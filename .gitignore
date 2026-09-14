@@ -1,0 +1,16 @@
+private/
+work/
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+*.pyc
+*.db
+*.db-*
+*.sqlite*
+*.pem
+*service-account*.json
+node_modules/
+.venv/
+dist/
