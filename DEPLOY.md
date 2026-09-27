@@ -99,3 +99,11 @@ GitHub Pages Source 選 **Deploy from a branch**，Branch 選 **main**，Folder 
 Google 權限完成後，先在本機 `scripts/check_sheets.py` 唯讀核對；再明確執行 `scripts/init_sheet_logs.py --create` 建立兩個紀錄分頁，確認後才將 `ROSTER_MODE=google`、`SHEETS_SYNC_ENABLED=true`。
 
 Gemini 準備好後填入私密 `GEMINI_API_KEY`，改 `AI_MODE=gemini`。完整驗證通過後改 `APP_MODE=production`。模型可用性、題目判斷品質、班級配額與 PostgreSQL 恢復必須實際驗證，不能以 `/healthz` 成功代替。
+
+## GitHub TXT 測試題目
+
+目前測試檔為專案根目錄的 `歐氏尖吻鮫.txt`。將 `PUZZLES_PATH` 設成 `歐氏尖吻鮫.txt`，後端便會載入部署版本中的 UTF-8 文字檔，不再讀取原本的 `/etc/secrets/puzzles.json`。本機設定已切換；Render 需由使用者修改變數並手動部署最新 commit。
+
+純 TXT 全文會顯示為謎面，同時作為 AI 判斷依據；標題取檔名。此測試文章沒有分開的湯底，程式不自動編造答案。檔案已公開在 GitHub，內容不是保密題庫。若需要隱藏湯底，仍使用原有 JSON 題庫。修改 TXT 後重新部署，內容雜湊會產生新活動版本，舊場次仍保留原文。
+
+`AI_MODE=mock` 不會進行自由問答判斷，TXT 未設定固定模擬答案；要測試真實 AI，由使用者設定 `AI_MODE=gemini` 和 `GEMINI_API_KEY`。`GEMINI_MAX_OUTPUT_TOKENS` 使用 `1024`，不可填 `50`。本次不呼叫付費模型、不操作 Render，也不修改 Google 試算表。六欄試算表的 D～F 同步仍待接入，目前同步器使用獨立紀錄分頁。

@@ -78,3 +78,11 @@ node --check web/app.js
 必須一個 worker、一個服務實例，互斥使用程序鎖；多實例須改共用交易鎖與工作租約。API 送出後中斷可能已產生供應商費用，不能宣稱外部呼叫恰好一次。系統不自動重試不確定結果。
 
 已驗證 SQLite／模擬供應商；真實 Gemini、Google 線上寫入、PostgreSQL 連線與全班負載仍待部署測試。Render 欄位詳見 `DEPLOY.md`。
+
+## GitHub TXT 測試題目
+
+目前測試檔為專案根目錄的 `歐氏尖吻鮫.txt`。將 `PUZZLES_PATH` 設成 `歐氏尖吻鮫.txt`，後端便會載入部署版本中的 UTF-8 文字檔，不再讀取原本的 `/etc/secrets/puzzles.json`。本機設定已切換；Render 需由使用者修改變數並手動部署最新 commit。
+
+純 TXT 全文會顯示為謎面，同時作為 AI 判斷依據；標題取檔名。此測試文章沒有分開的湯底，程式不自動編造答案。檔案已公開在 GitHub，內容不是保密題庫。若需要隱藏湯底，仍使用原有 JSON 題庫。修改 TXT 後重新部署，內容雜湊會產生新活動版本，舊場次仍保留原文。
+
+`AI_MODE=mock` 不會進行自由問答判斷，TXT 未設定固定模擬答案；要測試真實 AI，由使用者設定 `AI_MODE=gemini` 和 `GEMINI_API_KEY`。`GEMINI_MAX_OUTPUT_TOKENS` 使用 `1024`，不可填 `50`。本次不呼叫付費模型、不操作 Render，也不修改 Google 試算表。六欄試算表的 D～F 同步仍待接入，目前同步器使用獨立紀錄分頁。

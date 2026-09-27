@@ -86,7 +86,17 @@ class Service:
 
     def puzzles(self):
         try:
-            data = json.loads(self.settings.path(self.settings.puzzles_path).read_text(encoding='utf-8-sig'))
+            path = self.settings.path(self.settings.puzzles_path)
+            text = path.read_text(encoding='utf-8-sig')
+            if path.suffix.lower() == '.txt':
+                # A plain TXT is a visible reading passage and the judging reference.
+                # Never invent a hidden solution that the teacher did not provide.
+                surface = text.strip()
+                data = [{'id': 'txt-' + hashlib.sha256(path.name.encode()).hexdigest()[:12],
+                         'version': '1', 'title': path.stem, 'surface': surface,
+                         'solution': surface, 'facts': [], 'max_turns': 30}]
+            else:
+                data = json.loads(text)
             if not isinstance(data, list) or not data:
                 raise ValueError()
             ids = set()
