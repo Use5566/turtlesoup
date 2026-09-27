@@ -1,13 +1,17 @@
 # turtlesoup｜海龜湯思考實驗室
 
-GitHub Pages 提供前台，Render 提供登入與 Gemini 判斷，Google 試算表保存場次、問答與草稿。Render 不需要 PostgreSQL 或持久磁碟。
+Render 同時提供前台、登入與 Gemini 判斷，Google 試算表保存場次、問答與草稿。Render 不需要 PostgreSQL 或持久磁碟。
+
+學生入口： https://turtlesoup-ytac.onrender.com/
+
+前台直接呼叫同一網址的 `/api`。GitHub 保存原始碼與 TXT；舊 Pages 僅保留轉址頁，不再維護第二份前台。Render 只公開 `web/` 靜態資源，不公開根目錄 TXT、後端或私密檔。
 
 ## Render 只填兩項
 
 - `GEMINI_API_KEY`：私密金鑰。
 - `GOOGLE_APPLICATION_CREDENTIALS=/etc/secrets/google-service-account.json`：搭配同名 Secret File。
 
-Render 平台的 `RENDER=true` 會套用正式設定：Google 名冊、Gemini 3.5 Flash Lite、temperature 0、max output tokens 1024、gid 0、現有試算表與 GitHub Pages 來源。其他舊環境變數（包括 DATABASE_URL）不會覆寫正式設定，可移除。
+Render 平台的 `RENDER=true` 會套用正式設定：Google 名冊、Gemini 3.5 Flash Lite、temperature 0、max output tokens 1024、gid 0、現有試算表與 Render 同源網址。其他舊環境變數（包括 DATABASE_URL）不會覆寫正式設定，可移除。
 
 ## 七欄試算表
 

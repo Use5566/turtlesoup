@@ -1,4 +1,8 @@
-# Render 兩項設定與真人測試
+# Render 前後台整合：兩項設定與真人測試
+
+學生入口：https://turtlesoup-ytac.onrender.com/
+
+前後台現在由同一個 Render Web Service 提供，不需新增 Static Site。GitHub 保存程式碼與 TXT，舊 Pages 只有轉址頁。需手動部署此版本後，新首頁才會生效。
 
 | Environment Variable | 值 |
 | --- | --- |
@@ -15,7 +19,7 @@ Health Check Path：`/healthz`。Pre-Deploy 留白。由你手動部署最新 co
 
 ## 真人測試順序
 
-1. 部署後開啟 GitHub Pages，以試算表帳號登入。
+1. 部署後開啟 Render 網址，以試算表帳號登入。
 2. 選題確認只顯示謎面，不顯示 TXT 全文與答案。
 3. 輸入草稿但不送出，等待35秒確認已儲存，登出再登入接續，確認草稿及問句類型恢復。
 4. 正式提問，確認肯定／否定或無關回答；查看 F/G 保存內容。

@@ -192,6 +192,6 @@ def create_app(settings=None, roster=None, ai=None, google=None):
         checkpoint()
         return service.game(sid, str(uid))
 
-    if settings.app_mode == 'local':
-        app.mount('/', StaticFiles(directory=ROOT / 'web', html=True), name='web')
+    # Register after API routes; expose only frontend assets, never repository data.
+    app.mount('/', StaticFiles(directory=ROOT / 'web', html=True), name='web')
     return app

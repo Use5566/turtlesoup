@@ -39,7 +39,7 @@ class Settings:
                 app_mode='production', ai_mode='gemini', roster_mode='google',
                 sheets_sync_enabled=True, puzzles_path='歐氏尖吻鮫.txt',
                 sheet_storage=True, sync_seconds=35,
-                allowed_origins='https://use5566.github.io',
+                allowed_origins='https://turtlesoup-ytac.onrender.com',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),
                 database_url='sqlite://')
