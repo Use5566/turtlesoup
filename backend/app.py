@@ -72,6 +72,7 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     @asynccontextmanager
     async def lifespan(app):
         if settings.sheet_storage:
+            await asyncio.to_thread(google.write_student_records, [], True)
             await asyncio.to_thread(restore, store, google)
         service.recover()
         await asyncio.to_thread(checkpoint)

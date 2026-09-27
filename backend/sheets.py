@@ -9,6 +9,7 @@ from sqlalchemy import select
 from .models import Game, Turn
 from .roster import normalize
 from .sheet_state import snapshot
+from .readable_records import decode, cell
 
 TURN_TAB = '海龜湯互動紀錄'
 GAME_TAB = '海龜湯場次摘要'
@@ -117,13 +118,40 @@ class GoogleSheets:
         # RAW prevents formula execution, including malicious student questions.
         self.request('POST', '/values:batchUpdate', json={'valueInputOption': 'RAW', 'data': writes})
 
-    def write_student_records(self, rows):
+    def record_notes(self, tab, count):
+        result = self.request('GET', params={'ranges': address(tab, f'F2:G{count}'),
+            'includeGridData': 'true', 'fields': 'sheets.data(startRow,rowData.values.note)'})
+        notes = {}
+        for sheet in result.get('sheets', []):
+            for grid in sheet.get('data', []):
+                for i, row in enumerate(grid.get('rowData', []), grid.get('startRow', 1) + 1):
+                    notes[i] = [v.get('note', '') for v in row.get('values', [])]
+        return notes
+
+    def recovery_rows(self):
+        props = next(s['properties'] for s in self.metadata()['sheets']
+                     if s['properties']['sheetId'] == self.settings.google_roster_gid)
+        rows = self.roster_rows(self.settings.google_roster_gid)
+        notes = self.record_notes(props['title'], max(2, len(rows)))
+        for number, row in enumerate(rows[1:], 2):
+            if not any(row):
+                continue
+            student = normalize(row[0], row[1])
+            row.extend([''] * max(0, 7 - len(row)))
+            for col, note in enumerate(notes.get(number, []), 5):
+                if note:
+                    row[col] = json.dumps(decode(row[col], note, student), ensure_ascii=False)
+        return rows
+
+    def write_student_records(self, rows, migrate=False):
         """Merge UUID-keyed history into F/G, preserving earlier database histories."""
         with self.lock:
             props = next(p['properties'] for p in self.metadata()['sheets']
                          if p['properties']['sheetId'] == self.settings.google_roster_gid)
             tab = props['title']
             snapshot = self.values(tab, 'A1:G' + str(min(props['gridProperties']['rowCount'], 2000)))
+            human = self.settings.sheet_storage
+            notes = self.record_notes(tab, max(2, len(snapshot))) if human else {}
             expected = ['班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要']
             if not snapshot or [str(v).strip() for v in snapshot[0]] != expected:
                 raise ValueError('名冊必須依序包含七欄：' + '、'.join(expected))
@@ -136,20 +164,25 @@ class GoogleSheets:
                     raise ValueError('名冊學生重複，停止同步')
                 index[student] = (number, cells)
             pending = {}
+            def history_for(student, number, cells):
+                history = []
+                for col in (5, 6):
+                    raw = cells[col] if len(cells) > col else ''
+                    cell_notes = notes.get(number, [])
+                    note = cell_notes[col - 5] if len(cell_notes) > col - 5 else ''
+                    history.append(decode(raw, note, student))
+                return history
+            if migrate:
+                for student, (number, cells) in index.items():
+                    if any(cells[5:7]) and not any(notes.get(number, [])):
+                        pending[student] = history_for(student, number, cells)
             for kind, _, values in rows:
                 student = normalize(values[2], values[3]) if kind == TURN_TAB else normalize(values[1], values[2])
                 if student not in index:
                     raise ValueError('紀錄所屬學生不在名冊，停止同步')
                 number, cells = index[student]
                 if student not in pending:
-                    history = []
-                    for col in (5, 6):
-                        raw = cells[col] if len(cells) > col else ''
-                        obj = json.loads(raw) if raw else {}
-                        if not isinstance(obj, dict) or any(not isinstance(v, dict) for v in obj.values()):
-                            raise ValueError('既有紀錄格式不符，保留原內容')
-                        history.append(obj)
-                    pending[student] = history
+                    pending[student] = history_for(student, number, cells)
                 col = 0 if kind == TURN_TAB else 1
                 headers = TURN_HEADERS if col == 0 else GAME_HEADERS
                 record = dict(zip(headers, values))
@@ -166,9 +199,17 @@ class GoogleSheets:
                 # sort/edit the roster during a sync; Sheets has no conditional writes.
                 if self.values(tab, f'A{number}:G{number}') != [cells]:
                     raise ValueError('名冊同步期間變更，稍後重新對應')
-                writes.append({'range': address(tab, f'F{number}:G{number}'), 'values': [serialized]})
+                if human:
+                    writes.append({'updateCells': {'start': {'sheetId': props['sheetId'], 'rowIndex': number - 1, 'columnIndex': 5},
+                        'rows': [{'values': [cell(history[0], student), cell(history[1], student, True)]}],
+                        'fields': 'userEnteredValue,note,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment'}})
+                else:
+                    writes.append({'range': address(tab, f'F{number}:G{number}'), 'values': [serialized]})
             if writes:
-                self.request('POST', '/values:batchUpdate', json={'valueInputOption': 'RAW', 'data': writes})
+                if human:
+                    self.request('POST', ':batchUpdate', json={'requests': writes})
+                else:
+                    self.request('POST', '/values:batchUpdate', json={'valueInputOption': 'RAW', 'data': writes})
 
 
 class Syncer:

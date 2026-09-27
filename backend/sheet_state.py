@@ -16,7 +16,7 @@ def snapshot(game, turns):
 
 
 def restore(store, google):
-    rows = google.roster_rows(google.settings.google_roster_gid)
+    rows = google.recovery_rows()
     if not rows or [str(v).strip() for v in rows[0]][:7] != [
             '班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要']:
         raise ValueError('試算表七欄格式不正確，無法恢復場次')

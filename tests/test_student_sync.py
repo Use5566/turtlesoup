@@ -20,7 +20,22 @@ def fake_google(settings):
         return [table[number - 1][:]]
     google.values = values
     calls = []
+    notes = {}
+    google.test_notes = notes
     def request(method, suffix='', **kwargs):
+        if method == 'GET':
+            return {'sheets': [{'data': [{'startRow': 1, 'rowData': [
+                {'values': [{'note': n} for n in notes.get(i, ['', ''])]}
+                for i in range(2, len(table) + 1)]}]}]}
+        if suffix == ':batchUpdate':
+            for request in kwargs['json']['requests']:
+                change = request['updateCells']
+                n = change['start']['rowIndex'] + 1
+                cells = change['rows'][0]['values']
+                table[n - 1][5:7] = [x['userEnteredValue']['stringValue'] for x in cells]
+                notes[n] = [x['note'] for x in cells]
+            calls.append(kwargs['json'])
+            return {}
         assert suffix == '/values:batchUpdate'
         body = kwargs['json']
         assert body['valueInputOption'] == 'RAW'
