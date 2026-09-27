@@ -1,5 +1,7 @@
 # turtlesoup｜海龜湯思考實驗室
 
+**Render 最新設定：只填 `GEMINI_API_KEY`、`GOOGLE_APPLICATION_CREDENTIALS`、`DATABASE_URL`。** 程式偵測平台 `RENDER=true` 後自動套用正式設定，舊的模式、題庫、模型與同步環境變數不再覆寫 Render 設定。以下手動設定選項僅適用於本機或其他部署環境。完整操作見 `DEPLOY.md`。
+
 學生以班級、座號與五位數字密碼登入，用封閉問題探索故事。前台以 iPad 橫式為主，支援手機。GitHub Pages 提供靜態前台，Python FastAPI 提供登入、Gemini 判斷、遊戲保存與 Google 試算表同步。
 
 目前是模擬版，不呼叫 Gemini。Google 試算表同步預設關閉；本機採教師提供的私密名冊。正式題庫尚待教師提供；`scripts/init_demo.py` 是公開、僅供測試的原創範例題，不能用來存放保密的正式湯底。

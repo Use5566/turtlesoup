@@ -1,52 +1,40 @@
-# 正式互動測試設定（七欄版）
+# Render 最少設定（三項）
 
-已核對程式與截圖。公開後端 /healthz 回應 200，/api/config 顯示 Gemini 已啟用、試算表同步尚未啟用。截圖所有欄位均為有效設定，無需刪除。
+新版會利用 Render 平台自帶的 `RENDER=true` 自動套用正式設定，不需自行新增 RENDER。平台說明：https://render.com/docs/environment-variables
 
-## 必須補上或確認
+## 只需保留的 Environment Variables
 
-| 環境變數 | 值 | 用途 |
-| --- | --- | --- |
-| APP_MODE | production | 正式模式檢查 |
-| DATABASE_URL | 本專案 PostgreSQL 的 Internal Database URL | 保存登入、場次、問題與待同步資料；不要貼出密碼 |
-| SHEETS_SYNC_ENABLED | true | 啟用 F、G 同步 |
-
-APP_MODE=production 必須配合有效 PostgreSQL、Gemini、Google 名冊；未準備資料庫時請先建立並設定 DATABASE_URL，不可只改模式。現有 SQLite 資料不會自動搬到 PostgreSQL。
-
-## 保留目前設定
-
-| 環境變數 | 值 |
+| 名稱 | 值 |
 | --- | --- |
-| AI_MODE | gemini |
-| ALLOWED_ORIGINS | https://use5566.github.io |
-| GEMINI_API_KEY | 保留既有私密金鑰 |
-| GEMINI_MODEL | gemini-3.5-flash-lite |
-| GEMINI_MAX_OUTPUT_TOKENS | 1024 |
-| GEMINI_TEMPERATURE | 0 |
+| GEMINI_API_KEY | 既有 Gemini 私密金鑰 |
 | GOOGLE_APPLICATION_CREDENTIALS | /etc/secrets/google-service-account.json |
-| GOOGLE_ROSTER_GID | 0 |
-| GOOGLE_SHEET_ID | 1CdLxYuVMC_YJ0hSRWoieaklwLJEdZHsi7MHVq-xyyOU |
-| PUZZLES_PATH | 歐氏尖吻鮫.txt |
-| ROSTER_MODE | google |
+| DATABASE_URL | 本專案 PostgreSQL 的 Internal Database URL |
 
-GEMINI_MODEL、GEMINI_MAX_OUTPUT_TOKENS、GEMINI_TEMPERATURE、GOOGLE_ROSTER_GID 的現值與預設相同，可以省略但仍有用途，建議保留以便核對。
+DATABASE_URL 仍然必要。本次簡化設定介面，沒有移除持久資料庫；若尚未建立 PostgreSQL，需先準備，否則新版會明確拒絕啟動。原 SQLite 資料不會自動搬遷。
 
-可不填：SESSION_SECONDS（預設7200）、SYNC_SECONDS（預設30）。ROSTER_PATH 僅 file 模式使用，Google 模式不需設定。HOST 沒有程式用途，已從範例移除。TURTLESOUP_API_URL 僅建置 GitHub Pages 使用，不需設在 Render。PORT 由 Render 提供，無需自行固定。
+Secret Files 保留 `google-service-account.json`。金鑰及資料庫連線字串不要放 GitHub。
 
-Secret Files 只需要 google-service-account.json。舊 roster.json 與 puzzles.json 已不被本次 Google 名冊＋GitHub TXT 配置使用，可由你移除。
+## 已固定在程式內
+
+正式模式、Gemini、Google 名冊、啟用試算表同步、現有試算表 ID、gid 0、GitHub Pages 來源、TXT 題庫目錄、Gemini 3.5 Flash Lite、temperature 0、max output tokens 1024、登入有效期7200秒、同步間隔30秒。
+
+部署新版時可以刪除舊的 APP_MODE、AI_MODE、ROSTER_MODE、ROSTER_PATH、SHEETS_SYNC_ENABLED、ALLOWED_ORIGINS、PUZZLES_PATH、GOOGLE_SHEET_ID、GOOGLE_ROSTER_GID、GEMINI_MODEL、GEMINI_TEMPERATURE、GEMINI_MAX_OUTPUT_TOKENS、SESSION_SECONDS、SYNC_SECONDS；新版在 Render 不讀取這些覆寫值。HOST、TURTLESOUP_API_URL 也不需設定。不要刪除 Render 平台自帶的 PORT 或 RENDER。
+
+本機不在 Render 時，仍支援 `.env.example` 的開發選項，預設 mock／file／SQLite／同步關閉，不會自動啟用付費 AI。
 
 ## 部署與驗收
 
-Start Command：`uvicorn backend.app:create_app --factory --host 0.0.0.0 --port $PORT --workers 1 --no-access-log --no-proxy-headers`
+先備妥上述三項與 Secret File，再手動部署新版。Start Command 保持：
 
-保持一個 worker、一個服務實例。Health Check Path：`/healthz`。Pre-Deploy 留白。不需額外建立紀錄分頁。
+`uvicorn backend.app:create_app --factory --host 0.0.0.0 --port $PORT --workers 1 --no-access-log --no-proxy-headers`
 
-1. 試算表首列必須依序是「班級、座號、密碼、謎底、謎面、互動紀錄、場次摘要」。F、G 初始留白。
-2. 由你補齊變數並手動部署最新 GitHub commit。
-3. 在 GitHub Pages 登入，確認只顯示謎面，活動名稱不顯示答案。
-4. 提出一個封閉問題，確認回覆為允許的肯定／否定詞或「無關」；資訊不足或服務錯誤以系統訊息呈現，不冒充答案。
-5. 等待約30～60秒，確認 F 出現問題與回答、G 出現場次摘要，前台顯示已同步。
-6. 結束場次再等候同步，確認 G 的場次狀態為 finished。
+Health Check Path：`/healthz`。Pre-Deploy 留白。維持單一 worker 與服務實例。
 
-F/G 是縮排 JSON，保留多場歷史並用 UUID 去重。不可在互動期間手動排序或編輯名冊；不可手動修改 F/G。超過單格容量或碰到不符格式的既有內容會停止覆寫，紀錄留在資料庫。
+1. 試算表首列依序為「班級、座號、密碼、謎底、謎面、互動紀錄、場次摘要」。
+2. 學生的謎底填「歐氏尖吻鮫」，謎面填學生應看到的文字；後端以 GitHub 根目錄同名 TXT 作判斷依據。
+3. 登入 GitHub Pages、提出封閉問題，等待約30～60秒，確認 F/G 有紀錄。
+4. 結束場次，再確認 G 狀態更新為 finished。
 
-本次 46 項本機測試通過，含登入／提問／結束／F-G 寫入、重試去重、學生列換位、容量與既有資料保護。尚未代你部署 Render，因此新版真實 Gemini＋Google 寫入的線上全流程仍需部署後驗收。
+F/G 使用縮排 JSON 並保留多場歷史。不要手動編輯 F/G 或在同步時排序名冊；非預期內容及容量超限會停止覆寫並保留資料庫紀錄。
+
+53 項本機測試通過；尚未代為部署 Render，也未驗證新版真實 Gemini／PostgreSQL／Google 寫入的線上全流程。

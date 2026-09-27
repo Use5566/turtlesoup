@@ -27,6 +27,22 @@ class Settings:
 
     @classmethod
     def from_env(cls):
+        if os.environ.get('RENDER', '').strip().lower() == 'true':
+            # Render supplies RENDER=true. Classroom deployment has one fixed
+            # profile; legacy mock/sync switches must not override it.
+            required = ('GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'DATABASE_URL')
+            missing = [name for name in required if not os.environ.get(name, '').strip()]
+            if missing:
+                raise ValueError('Render 缺少必要設定：' + '、'.join(missing))
+            settings = cls(
+                app_mode='production', ai_mode='gemini', roster_mode='google',
+                sheets_sync_enabled=True, puzzles_path='歐氏尖吻鮫.txt',
+                allowed_origins='https://use5566.github.io',
+                gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
+                google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),
+                database_url=os.environ['DATABASE_URL'].strip())
+            settings.validate()
+            return settings
         values = {}
         for name, field in cls.__dataclass_fields__.items():
             raw = os.environ.get(name.upper())
