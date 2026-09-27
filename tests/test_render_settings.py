@@ -9,11 +9,10 @@ def render_env(monkeypatch):
     monkeypatch.setenv('RENDER', 'true')
     monkeypatch.setenv('GEMINI_API_KEY', 'test-only-key')
     monkeypatch.setenv('GOOGLE_APPLICATION_CREDENTIALS', '/etc/secrets/google-service-account.json')
-    monkeypatch.setenv('DATABASE_URL', 'postgresql://test-only/database')
     return monkeypatch
 
 
-def test_render_only_three_settings(render_env):
+def test_render_only_two_settings(render_env):
     s = Settings.from_env()
     assert (s.app_mode, s.ai_mode, s.roster_mode) == ('production', 'gemini', 'google')
     assert s.sheets_sync_enabled
@@ -29,10 +28,10 @@ def test_legacy_variables_cannot_disable_production(render_env):
                         'SHEETS_SYNC_ENABLED': 'false', 'PUZZLES_PATH': '/old/puzzles.json',
                         'ALLOWED_ORIGINS': '*', 'GEMINI_MAX_OUTPUT_TOKENS': '50'}.items():
         render_env.setenv(name, value)
-    test_render_only_three_settings(render_env)
+    test_render_only_two_settings(render_env)
 
 
-@pytest.mark.parametrize('name', ['GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'DATABASE_URL'])
+@pytest.mark.parametrize('name', ['GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'])
 def test_missing_required_setting_fails_without_secret(render_env, name):
     render_env.setenv(name, ' ')
     with pytest.raises(ValueError) as error:
@@ -43,14 +42,15 @@ def test_missing_required_setting_fails_without_secret(render_env, name):
 
 def test_render_rejects_ephemeral_database(render_env):
     render_env.setenv('DATABASE_URL', 'sqlite:///private/test.db')
-    with pytest.raises(ValueError, match='PostgreSQL'):
-        Settings.from_env()
+    assert Settings.from_env().database_url == 'sqlite://'
+    assert Settings.from_env().sheet_storage
+    assert Settings.from_env().sync_seconds == 35
 
 
 def test_local_stays_offline(render_env):
     render_env.delenv('RENDER')
     for name in ('DATABASE_URL', 'GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS'):
-        render_env.delenv(name)
+        render_env.delenv(name, raising=False)
     s = Settings.from_env()
     assert (s.app_mode, s.ai_mode, s.roster_mode) == ('local', 'mock', 'file')
     assert not s.sheets_sync_enabled

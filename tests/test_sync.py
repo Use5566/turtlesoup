@@ -79,10 +79,11 @@ def test_atomic_log_initialization(settings):
     assert all(op.get('updateCells', {}).get('start', {}).get('sheetId') != 0 for op in operations)
 
 
-def test_preview_reserves_gemini_but_requires_postgres(settings):
+def test_preview_reserves_gemini_but_requires_sheets(settings):
     settings.app_mode = 'preview'
     with pytest.raises(ValueError): settings.validate()
-    settings.database_url = 'postgresql://unused'
+    settings.sheet_storage = True
+    settings.sheets_sync_enabled = True
     settings.allowed_origins = 'https://use5566.github.io'
     settings.validate()
     assert settings.ai_mode == 'mock' and settings.gemini_api_key == ''

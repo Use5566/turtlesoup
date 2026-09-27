@@ -24,23 +24,25 @@ class Settings:
     allowed_origins: str = 'http://127.0.0.1:8765,http://localhost:8765'
     session_seconds: int = 7200
     sync_seconds: int = 30
+    sheet_storage: bool = False
 
     @classmethod
     def from_env(cls):
         if os.environ.get('RENDER', '').strip().lower() == 'true':
             # Render supplies RENDER=true. Classroom deployment has one fixed
             # profile; legacy mock/sync switches must not override it.
-            required = ('GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS', 'DATABASE_URL')
+            required = ('GEMINI_API_KEY', 'GOOGLE_APPLICATION_CREDENTIALS')
             missing = [name for name in required if not os.environ.get(name, '').strip()]
             if missing:
                 raise ValueError('Render 缺少必要設定：' + '、'.join(missing))
             settings = cls(
                 app_mode='production', ai_mode='gemini', roster_mode='google',
                 sheets_sync_enabled=True, puzzles_path='歐氏尖吻鮫.txt',
+                sheet_storage=True, sync_seconds=35,
                 allowed_origins='https://use5566.github.io',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),
-                database_url=os.environ['DATABASE_URL'].strip())
+                database_url='sqlite://')
             settings.validate()
             return settings
         values = {}
@@ -61,8 +63,8 @@ class Settings:
             if self.ai_mode != 'gemini' or self.roster_mode != 'google':
                 raise ValueError('正式模式必須使用 Gemini 與 Google 名冊')
         if self.app_mode in ('preview', 'production'):
-            if not self.database_url.startswith(('postgresql://', 'postgresql+psycopg://', 'postgres://')):
-                raise ValueError('正式模式必須設定持久 PostgreSQL DATABASE_URL')
+            if not self.sheet_storage or not self.sheets_sync_enabled:
+                raise ValueError('正式模式必須啟用 Google 試算表儲存')
             if '*' in self.allowed_origins or any(not x.strip().startswith('https://') for x in self.allowed_origins.split(',')):
                 raise ValueError('正式模式必須指定 HTTPS 前台來源')
         if self.session_seconds < 60 or self.sync_seconds < 5:

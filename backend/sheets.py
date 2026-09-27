@@ -8,6 +8,7 @@ from google.auth.transport.requests import AuthorizedSession
 from sqlalchemy import select
 from .models import Game, Turn
 from .roster import normalize
+from .sheet_state import snapshot
 
 TURN_TAB = '海龜湯互動紀錄'
 GAME_TAB = '海龜湯場次摘要'
@@ -151,7 +152,10 @@ class GoogleSheets:
                     pending[student] = history
                 col = 0 if kind == TURN_TAB else 1
                 headers = TURN_HEADERS if col == 0 else GAME_HEADERS
-                pending[student][col][str(values[0])] = dict(zip(headers, values))
+                record = dict(zip(headers, values))
+                if col == 1 and len(values) > len(headers):
+                    record['_restore'] = values[-1]
+                pending[student][col][str(values[0])] = record
             writes = []
             for student, history in pending.items():
                 number, cells = index[student]
@@ -193,6 +197,8 @@ class Syncer:
                     total = known if all(type(x) is int for x in counts) else f'資料不完整（已知 {known}）'
                     rows.append((GAME_TAB, g.id + 1, [g.uid, classroom, seat, g.activity, g.version,
                         local_time(g.started), local_time(g.updated), len(all_turns), g.state, total, g.revision]))
+                    if getattr(getattr(self.google, 'settings', None), 'sheet_storage', False):
+                        rows[-1][2].append(snapshot(g, all_turns))
                 versions = [(g.id, g.revision) for g in games]
                 turn_ids = [t.id for t in turns]
             if not rows:

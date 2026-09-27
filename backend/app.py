@@ -14,6 +14,7 @@ from .roster import Roster, Unavailable, normalize
 from .ai import Gemini, MockAI
 from .service import Service, Problem
 from .sheets import GoogleSheets, Syncer
+from .sheet_state import restore
 
 
 class LoginInput(BaseModel):
@@ -35,6 +36,11 @@ class QuestionInput(BaseModel):
     question_type: str = Field(pattern=r'^(is|correct|will|has|may|can)$')
 
 
+class DraftInput(BaseModel):
+    question: str = Field(max_length=300)
+    question_type: str = Field(pattern=r'^(is|correct|will|has|may|can)$')
+
+
 def create_app(settings=None, roster=None, ai=None, google=None):
     settings = settings or Settings.from_env()
     settings.validate()
@@ -46,6 +52,15 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     syncer = Syncer(store, google)
     stop = threading.Event()
 
+    def checkpoint():
+        if settings.sheet_storage:
+            try:
+                syncer.once()
+            except Exception:
+                raise Problem(503, '尚未儲存至試算表，請保留頁面並稍後重試。') from None
+
+    service.checkpoint = checkpoint
+
     def sync_loop():
         while not stop.wait(settings.sync_seconds):
             try:
@@ -56,7 +71,10 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        if settings.sheet_storage:
+            await asyncio.to_thread(restore, store, google)
         service.recover()
+        await asyncio.to_thread(checkpoint)
         worker = None
         if settings.sheets_sync_enabled:
             worker = threading.Thread(target=sync_loop, daemon=True)
@@ -65,6 +83,11 @@ def create_app(settings=None, roster=None, ai=None, google=None):
         stop.set()
         if worker:
             await asyncio.to_thread(worker.join, 25)
+        if settings.sheet_storage:
+            try:
+                await asyncio.to_thread(checkpoint)
+            except Problem:
+                pass
         store.engine.dispose()
 
     app = FastAPI(title='turtlesoup', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -129,6 +152,7 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.post('/api/logout')
     def logout(request: Request):
+        checkpoint()
         service.logout(token(request))
         return {'ok': True}
 
@@ -142,7 +166,9 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.post('/api/games')
     def start(body: StartInput, sid=Depends(student)):
-        return service.start(sid, body.activity)
+        result = service.start(sid, body.activity)
+        checkpoint()
+        return service.game(sid, result['id'])
 
     @app.get('/api/games/{uid}')
     def game(uid: UUID, sid=Depends(student)):
@@ -150,11 +176,21 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.post('/api/games/{uid}/questions')
     def ask(uid: UUID, body: QuestionInput, sid=Depends(student)):
-        return service.ask(sid, str(uid), str(body.request_id), body.question, body.question_type)
+        result = service.ask(sid, str(uid), str(body.request_id), body.question, body.question_type)
+        checkpoint()
+        return result
+
+    @app.post('/api/games/{uid}/save')
+    def save(uid: UUID, body: DraftInput, sid=Depends(student)):
+        service.save_draft(sid, str(uid), body.question, body.question_type)
+        checkpoint()
+        return service.game(sid, str(uid))
 
     @app.post('/api/games/{uid}/finish')
     def finish(uid: UUID, sid=Depends(student)):
-        return service.finish(sid, str(uid))
+        service.finish(sid, str(uid))
+        checkpoint()
+        return service.game(sid, str(uid))
 
     if settings.app_mode == 'local':
         app.mount('/', StaticFiles(directory=ROOT / 'web', html=True), name='web')

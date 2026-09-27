@@ -1,91 +1,50 @@
 # turtlesoup｜海龜湯思考實驗室
 
-**Render 最新設定：只填 `GEMINI_API_KEY`、`GOOGLE_APPLICATION_CREDENTIALS`、`DATABASE_URL`。** 程式偵測平台 `RENDER=true` 後自動套用正式設定，舊的模式、題庫、模型與同步環境變數不再覆寫 Render 設定。以下手動設定選項僅適用於本機或其他部署環境。完整操作見 `DEPLOY.md`。
+GitHub Pages 提供前台，Render 提供登入與 Gemini 判斷，Google 試算表保存場次、問答與草稿。Render 不需要 PostgreSQL 或持久磁碟。
 
-學生以班級、座號與五位數字密碼登入，用封閉問題探索故事。前台以 iPad 橫式為主，支援手機。GitHub Pages 提供靜態前台，Python FastAPI 提供登入、Gemini 判斷、遊戲保存與 Google 試算表同步。
+## Render 只填兩項
 
-目前是模擬版，不呼叫 Gemini。Google 試算表同步預設關閉；本機採教師提供的私密名冊。正式題庫尚待教師提供；`scripts/init_demo.py` 是公開、僅供測試的原創範例題，不能用來存放保密的正式湯底。
+- `GEMINI_API_KEY`：私密金鑰。
+- `GOOGLE_APPLICATION_CREDENTIALS=/etc/secrets/google-service-account.json`：搭配同名 Secret File。
 
-## 本機啟動
+Render 平台的 `RENDER=true` 會套用正式設定：Google 名冊、Gemini 3.5 Flash Lite、temperature 0、max output tokens 1024、gid 0、現有試算表與 GitHub Pages 來源。其他舊環境變數（包括 DATABASE_URL）不會覆寫正式設定，可移除。
 
-Python 3.12，於專案根目錄執行：
+## 七欄試算表
+
+首列依序為「班級、座號、密碼、謎底、謎面、互動紀錄、場次摘要」。前三欄驗證身分；謎底對應 GitHub 根目錄的同名 TXT，謎面才是學生看到的文字。活動名稱不揭露答案。TXT 已公開在 GitHub，不是保密資料。
+
+F 保存問答紀錄，G 保存摘要與 `_restore` 恢復資料（含當次題目快照、問答及草稿），以 UUID 去重。密碼與 API 金鑰不存入 F/G，也不傳給 AI。每列保存多場歷史。請勿手動編輯 F/G；有既有非系統格式內容時會停止恢復或寫入，不清空原資料。
+
+## 保存與恢復
+
+- 前台每 35 秒儲存尚未送出的問題與問句類型；後端每 35 秒補送尚未成功的紀錄。
+- 開始場次、提問前後、結束與正常登出都會確認雲端保存。儲存失敗回傳錯誤，保留頁面重試，不假稱成功。
+- AI 呼叫前先保存請求。重啟若遇到未完成請求，標記中斷，不自動重送付費 API。
+- Render 使用記憶體 SQLite 作執行期索引，啟動從 Google Sheets 恢復；沒有額外資料庫服務。讀取失敗不以空資料覆蓋試算表。
+- 重新登入後選同一活動即可接續，已結束的場次仍保持結束。活動版本變動會建立新場次。
+- 登入有效期按使用中的 API 請求延長，閒置兩小時後需重新登入；密碼變動仍會撤銷登入。
+
+瀏覽器關閉、斷網、背景分頁節流或裝置當機，可能使最近未成功保存的草稿無法恢復。35 秒不是關機時的保存保證。正常離開請用登出；草稿非空時關閉頁面會提示。
+
+## 本機與測試
+
+本機預設 file 名冊、mock AI、SQLite 私密檔案，不呼叫真實 Gemini。`private/local.env`、名冊、憑證均不提交 GitHub。
 
 ```powershell
 python -m venv work/venv
 ./work/venv/Scripts/python.exe -m pip install -r requirements-dev.txt
 ./work/venv/Scripts/python.exe scripts/init_demo.py
 ./work/venv/Scripts/python.exe scripts/run_local.py
-```
-
-開啟 http://127.0.0.1:8765 。全新副本的合成示範帳號：999 班、01 號、12345。既有本機沙盒已有教師提供的私密名冊，請使用教師給的帳號。初始化不覆寫既有資料。本機啟動器只綁定 127.0.0.1，實體 iPad 連線須另行安排。
-
-## 功能
-
-- 名冊依欄名辨識「班級、座號、密碼」，可容忍其他欄位。座號 1 與 01 等同；密碼必須是五位半形數字。
-- 兩小時登入憑證、重新登入撤銷舊憑證、登出、登入限流；每次資料 API 檢查學生身分。
-- Bearer token 只存在前台記憶體，重新整理需重新登入；遊戲進度從資料庫恢復。跨站使用 Authorization，不依賴第三方 Cookie。
-- 回答白名單：是／不是、對／不對、會／不會、有／沒有、可／不可、能／不能、無關。Gemini 結構化結果仍經後端驗證，額外解釋一律不顯示。
-- 複合／開放式問題、資訊不足、供應商故障使用獨立系統訊息，不冒充「無關」。白名單限制格式，語意正確性仍須正式題庫與真實模型驗證。
-- 每位學生每活動版本一個場次。題目內容雜湊變動建立新版本，舊場次保留；結束後不能再提問，不自動揭曉湯底。
-- 每題最多 300 字、預設 30 次提問、每學生五分鐘最多 20 次新提問。失敗、改寫請求也計一次並記錄狀態。
-- UUID 去重；正在處理時禁止第二題；重啟將未完成問題標為中斷，不自動重發可能已計費的 AI 請求。
-- SQLite 本機保存；線上 preview／production 強制使用 PostgreSQL。待同步紀錄持久保留，Google 試算表供老師查閱、分析。
-
-## 私密設定與模式
-
-`private/local.env`：本機設定。`private/roster.json`：本機名冊。`private/puzzles.json`：題庫。`private/google-service-account.json`：Google 憑證。這些均被 Git 排除，不能放進 `web/`。
-
-`APP_MODE=local`：本機前後台、SQLite、可模擬。`APP_MODE=preview`：線上測試、PostgreSQL、可模擬。`APP_MODE=production`：要求 PostgreSQL、Google 名冊與 Gemini。
-
-Gemini 預留欄位：`GEMINI_API_KEY`、`GEMINI_MODEL=gemini-3.5-flash-lite`、`GEMINI_TEMPERATURE=0`、`GEMINI_MAX_OUTPUT_TOKENS=1024`。`AI_MODE=mock` 不送出 API 請求；日後設 `AI_MODE=gemini` 並填入金鑰才啟用。金鑰缺失不產生假回答。
-
-題庫是 JSON 陣列，各題含 `id`、`version`、`title`、`surface`、`solution`、`facts`、`enabled`、`max_turns`；`mock_cases` 與 `mock_examples` 是可選本機固定範例。正式題庫只留後端私密儲存。活動目前由題庫管理，尚未實作試算表「活動設定」分頁或教師後台。
-
-## Google 試算表
-
-https://docs.google.com/spreadsheets/d/1CdLxYuVMC_YJ0hSRWoieaklwLJEdZHsi7MHVq-xyyOU/edit
-
-名冊 gid 預設 0。程式先讀 metadata 解析真實分頁名稱，再讀有界範圍。名冊不送前台或 Gemini，密碼不寫入學習紀錄。名冊快取最多 30 秒；過期無法更新時停止認證。修改密碼／刪除學生會在快取更新後撤銷舊登入。
-
-唯讀核對（不列出密碼）：
-
-```powershell
-./work/venv/Scripts/python.exe scripts/check_sheets.py
-```
-
-正式七欄模式使用 `ROSTER_MODE=google`、`SHEETS_SYNC_ENABLED=true`。不需要建立額外紀錄分頁，也不要執行 `init_sheet_logs.py`。每 30 秒讀取指定 gid，以班級與座號對應學生，只寫 F（互動紀錄）、G（場次摘要）；A～E 保持原值。
-
-F、G 使用有縮排的 JSON，以請求 UUID／場次 UUID 為索引。F 含提問時間、問題、回答、模型、tokens 與處理狀態；G 含開始／更新時間、提問總數、場次狀態及 tokens。保留歷次場次與既有 UUID 紀錄，重試不重複新增。不要手動修改這兩欄；初次使用可留空。既有內容非指定格式時停止同步，不覆蓋原資料。
-
-讀取後會再次確認整列未變動，但 Google Sheets 不提供條件式寫入，因此使用期間請勿排序、移動或編輯名冊。跨同步週期的列順序變動會重新按身分對應。單格接近 49,000 UTF-16 單位時停止同步，資料保留於 PostgreSQL，需先封存紀錄。同步錯誤會持續重試，前台維持「等待試算表同步」。
-
-舊的 file 名冊開發模式仍可使用獨立分頁同步。正式七欄模式不使用該流程。
-
-tokens 採 API 的 `totalTokenCount`，不重複加快取；缺值標記「未提供／資料不完整」。模擬模式是 `local-mock`、0 tokens，並非真實 Gemini。中斷後未知的供應商費用不能視為零。
-
-## 驗證與限制
-
-```powershell
 ./work/venv/Scripts/python.exe -m pytest tests --basetemp=work/pytest-run
-node --check web/app.js
+node --test tests/autosave.cjs
 ```
 
-必須一個 worker、一個服務實例，互斥使用程序鎖；多實例須改共用交易鎖與工作租約。API 送出後中斷可能已產生供應商費用，不能宣稱外部呼叫恰好一次。系統不自動重試不確定結果。
+舊 file 模式的獨立紀錄分頁功能僅保留給本機相容測試，正式七欄模式不用執行 `init_sheet_logs.py`。
 
-已驗證 SQLite／模擬供應商；真實 Gemini、Google 線上寫入、PostgreSQL 連線與全班負載仍待部署測試。Render 欄位詳見 `DEPLOY.md`。
+## 運作限制
 
-## GitHub TXT 測試題目
+單一服務實例、單一 worker；部署重啟期間不要繼續上課提問。這不是多實例同步系統。使用期間不要排序或移動名冊；Google Sheets 沒有條件式寫入。F/G 單格接近49,000 UTF-16單位時會拒絕新增並提示未保存，需先由老師封存紀錄；不得直接刪除恢復資料。已在記憶體但未同步的修改若遇服務中斷仍可能遺失。
 
-目前測試檔為專案根目錄的 `歐氏尖吻鮫.txt`。將 `PUZZLES_PATH` 設成 `歐氏尖吻鮫.txt`，後端便會載入部署版本中的 UTF-8 文字檔，不再讀取原本的 `/etc/secrets/puzzles.json`。本機設定已切換；Render 需由使用者修改變數並手動部署最新 commit。
+舊版 F/G 摘要可依同名 TXT 恢復；已變更的題目版本無法繼續提問。只有舊 PostgreSQL 而尚未同步到 Sheets 的資料不會自動遷移。
 
-純 TXT 全文會顯示為謎面，同時作為 AI 判斷依據；標題取檔名。此測試文章沒有分開的湯底，程式不自動編造答案。檔案已公開在 GitHub，內容不是保密題庫。若需要隱藏湯底，仍使用原有 JSON 題庫。修改 TXT 後重新部署，內容雜湊會產生新活動版本，舊場次仍保留原文。
-
-`AI_MODE=mock` 不會進行自由問答判斷，TXT 未設定固定模擬答案；要測試真實 AI，由使用者設定 `AI_MODE=gemini` 和 `GEMINI_API_KEY`。`GEMINI_MAX_OUTPUT_TOKENS` 使用 `1024`，不可填 `50`。本次不呼叫付費模型、不操作 Render，也不修改 Google 試算表。正式七欄名冊改由 F、G 保存紀錄。
-
-## 七欄名冊指定題目（優先於純 TXT 全文模式）
-
-名冊含「謎底」「謎面」兩個欄名時，按登入學生所在列指定題目。「謎底」填 `歐氏尖吻鮫`，後端從 `PUZZLES_PATH` 所在目錄讀取 `歐氏尖吻鮫.txt` 作為判斷資料；「謎面」填學生應看到的文字。活動標題統一為「海龜湯挑戰」，API 不傳謎底或 TXT 全文。任一欄空白時該學生沒有活動，不沿用其他學生的題目。欄名存在時不退回全文展示。
-
-Render 保持 `ROSTER_MODE=google`、`GOOGLE_ROSTER_GID=0`，並設定 `PUZZLES_PATH=歐氏尖吻鮫.txt`。名冊更新最多快取 30 秒；TXT 更新需重新部署。只有未包含這兩欄的舊名冊才使用前述純 TXT 全文模式。公開 GitHub 的 TXT 仍可由原始碼瀏覽，此修改只防止遊戲介面直接顯示答案。
-
-「互動紀錄」「場次摘要」已串接 F、G 欄；啟用 SHEETS_SYNC_ENABLED=true 後每 30 秒同步。
+回答只允許肯定／否定配對及無關。資訊不足、問題需改寫、模型服務錯誤使用系統訊息，不冒充答案。詳見 DEPLOY.md。

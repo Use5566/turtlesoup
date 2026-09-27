@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const apiBase = (window.TURTLESOUP_CONFIG?.apiBase || "").replace(/\/$/, "");
 let token = "", game = null, mode = "mock", pending = null, busy = false, generation = 0;
-const syncLabels = { local: "已保存 · 試算表未啟用", pending: "已保存 · 等待試算表同步", synced: "已同步試算表" };
+const syncLabels = { local: "已保存 · 試算表未啟用", pending: "尚未完成雲端儲存 · 請保留頁面", synced: "已儲存至試算表" };
 
 function show(view) {
   for (const name of ["login", "activities", "game"]) $(name + "-view").hidden = name !== view;
@@ -54,7 +54,11 @@ $("login-form").addEventListener("submit", async event => {
 });
 $("logout").addEventListener("click", async () => {
   $("logout").disabled = true;
-  try { await api("/api/logout", { method: "POST" }); clearIdentity(); }
+  try {
+    if (busy || pending) throw new Error("請先確認目前提問結果，再登出。");
+    await saveDraft();
+    await api("/api/logout", { method: "POST" }); clearIdentity();
+  }
   catch(e) { $("game-error").textContent = e.message; $("activity-error").textContent = e.message; }
   finally { $("logout").disabled = false; }
 });
@@ -77,7 +81,8 @@ async function activities() {
           const result = await api("/api/games", { method: "POST", body: JSON.stringify({ activity: item.id }) });
           if (epoch !== generation || !token) return;
           game = result;
-          pending = null; $("question").value = ""; $("game-error").textContent = "";
+          pending = null; $("question").value = game.draft || "";
+          $("question-type").value = game.draft_kind || "is"; updateCount(); $("game-error").textContent = "";
           renderGame(); show("game");
         } catch (e) { $("activity-error").textContent = e.message; } finally { button.disabled = false; }
       });
@@ -132,6 +137,8 @@ function updateCount() { $("char-count").textContent = Array.from($("question").
 $("question").addEventListener("input", updateCount);
 $("question-form").addEventListener("submit", async event => {
   event.preventDefault(); if (busy || pending || !game || !$("question").value.trim()) return;
+  if (saving) { try { await saving; } catch { /* Submission retries the cloud save. */ } }
+  if (!game || !token || busy || pending) return;
   pending = { request_id: crypto.randomUUID(), question: $("question").value.trim(), question_type: $("question-type").value };
   await sendPending();
 });
@@ -151,7 +158,11 @@ async function sendPending() {
   } finally { busy = false; renderGame(); }
 }
 $("retry").addEventListener("click", sendPending);
-$("back").addEventListener("click", () => { if (busy || pending) { $("game-error").textContent = "請先確認目前提問的結果。"; return; } game = null; activities(); });
+$("back").addEventListener("click", async () => {
+  if (busy || pending) { $("game-error").textContent = "請先確認目前提問的結果。"; return; }
+  try { await saveDraft(); game = null; activities(); }
+  catch(e) { $("game-error").textContent = e.message; }
+});
 $("finish").addEventListener("click", () => $("finish-dialog").showModal());
 $("cancel-finish").addEventListener("click", () => $("finish-dialog").close());
 $("confirm-finish").addEventListener("click", async () => {
@@ -177,3 +188,26 @@ setInterval(async () => {
   finally { polling = false; }
 }, 5000);
 setup();
+
+let saving = null;
+function saveDraft() {
+  if (saving) return saving.then(() => saveDraft());
+  if (!game || !token || game.state !== "active" || busy || pending) return Promise.resolve();
+  const uid = game.id, epoch = generation;
+  const body = JSON.stringify({question: $("question").value, question_type: $("question-type").value});
+  saving = api("/api/games/" + uid + "/save", {method: "POST", body})
+    .then(result => {
+      if (epoch === generation && game?.id === uid) {
+        $("sync-status").textContent = syncLabels[result.sync] + " · 每35秒自動儲存";
+      }
+    }).finally(() => { saving = null; });
+  return saving;
+}
+setInterval(() => {
+  saveDraft().catch(e => { $("game-error").textContent = e.message; });
+}, 35000);
+window.addEventListener("beforeunload", event => {
+  if (game && (busy || pending || $("question").value)) {
+    event.preventDefault(); event.returnValue = "";
+  }
+});

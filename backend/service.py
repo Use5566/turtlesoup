@@ -29,6 +29,7 @@ class Service:
         self.settings, self.store, self.roster, self.ai = settings, store, roster, ai
         # One process/worker, serialized state changes; remote API calls happen outside this lock.
         self.lock = threading.RLock()
+        self.checkpoint = lambda: None
 
     def recover(self):
         with self.store.transaction() as db:
@@ -36,6 +37,7 @@ class Service:
             db.execute(delete(Login))
             for turn in db.scalars(select(Turn).where(Turn.status == 'processing')):
                 turn.status = 'interrupted'
+                turn.synced = 0
                 g = db.get(Game, turn.game_id)
                 g.revision += 1
                 g.updated = utcnow()
@@ -78,6 +80,7 @@ class Service:
                 raise Problem(401, '登入已過期，請重新登入。')
             if self.roster.fingerprint(login.student) != login.fingerprint:
                 raise Problem(401, '身分資料已更新，請重新登入。')
+            login.expires = time.time() + self.settings.session_seconds
             return login.student
 
     def logout(self, token):
@@ -162,6 +165,7 @@ class Service:
             p = json.loads(g.puzzle)
             turns = list(db.scalars(select(Turn).where(Turn.game_id == g.id).order_by(Turn.sequence)))
             return {'id': g.uid, 'activity': g.activity, 'title': p['title'], 'surface': p['surface'],
+                'draft': g.draft, 'draft_kind': g.draft_kind,
                 'state': g.state, 'max_turns': p.get('max_turns', 30), 'turns': [self.turn_json(t) for t in turns],
                 'sync': 'synced' if g.synced_revision == g.revision else ('pending' if self.settings.sheets_sync_enabled else 'local'),
                 'mock_examples': p.get('mock_examples', []) if self.settings.ai_mode == 'mock' else []}
@@ -209,6 +213,16 @@ class Service:
             tid = turn.id
             g.revision += 1
             g.updated = utcnow()
+            g.draft = ''
+        # Persist the request before calling a paid provider. A restart can then
+        # mark it interrupted rather than silently submitting it a second time.
+        try:
+            self.checkpoint()
+        except Exception:
+            with self.store.transaction() as db:
+                db.get(Turn, tid).status = 'interrupted'
+                db.get(Game, db.get(Turn, tid).game_id).revision += 1
+            raise
         try:
             result = self.ai.judge(puzzle, question, kind, history)
             answer, usage = display(result.decision, kind), result.usage
@@ -232,3 +246,10 @@ class Service:
             if g.state != 'finished':
                 g.state, g.updated, g.revision = 'finished', utcnow(), g.revision + 1
         return self.game(student, uid)
+
+    def save_draft(self, student, uid, text, kind):
+        with self.lock, self.store.transaction() as db:
+            g = self.owned(db, student, uid)
+            if g.state == 'active' and (g.draft != text or g.draft_kind != kind):
+                g.draft, g.draft_kind = text, kind
+                g.updated, g.revision = utcnow(), g.revision + 1
