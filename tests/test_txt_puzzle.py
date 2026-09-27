@@ -38,3 +38,29 @@ def test_empty_txt_fails_closed(settings, ai, tmp_path):
     settings.puzzles_path = str(path)
     with TestClient(create_app(settings, ai=ai)) as client:
         assert client.get('/api/activities', headers=login(client)).status_code == 503
+
+
+def test_sheet_assignment_hides_answer_and_is_per_student(settings, ai, tmp_path):
+    path = tmp_path / '歐氏尖吻鮫.txt'
+    path.write_text('PRIVATE_REFERENCE：歐氏尖吻鮫的顎可以向前彈出。', encoding='utf-8')
+    settings.puzzles_path = str(path)
+    app = create_app(settings, ai=ai)
+    with TestClient(app) as client:
+        roster = app.state.service.roster
+        roster.read_rows = lambda: [
+            ['班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要'],
+            ['999', '1', '12345', '歐氏尖吻鮫', '原本在我們面前的魚，瞬間消失了...'],
+            ['999', '2', '54321', '', '']]
+        h = login(client)
+        listing = client.get('/api/activities', headers=h)
+        activity = listing.json()['activities'][0]
+        game = client.post('/api/games', headers=h, json={'activity': activity['id']})
+        assert game.json()['surface'] == '原本在我們面前的魚，瞬間消失了...'
+        for response in (listing, game):
+            assert '歐氏尖吻鮫' not in response.text and 'PRIVATE_REFERENCE' not in response.text
+        assert 'PRIVATE_REFERENCE' in app.state.service.puzzles('999:01')[0]['solution']
+        other = login(client, '2', '54321')
+        assert client.get('/api/activities', headers=other).json()['activities'] == []
+        assert client.post('/api/games', headers=other, json={'activity': activity['id']}).status_code == 404
+        roster.assignments['999:01'] = ('../outside', 'test')
+        assert client.get('/api/activities', headers=h).status_code == 503

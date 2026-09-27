@@ -138,7 +138,7 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.get('/api/activities')
     def activities(sid=Depends(student)):
-        return {'activities': service.activities()}
+        return {'activities': service.activities(sid)}
 
     @app.post('/api/games')
     def start(body: StartInput, sid=Depends(student)):

@@ -24,6 +24,7 @@ class Roster:
         self.lock = threading.RLock()
         self.pepper = secrets.token_bytes(32)
         self.cache, self.loaded = {}, 0
+        self.assignments = None
 
     def digest(self, student, password):
         return hmac.new(self.pepper, f'{student}:{password}'.encode(), hashlib.sha256).hexdigest()
@@ -43,6 +44,7 @@ class Roster:
                 header = [str(x).strip() for x in rows[0]]
                 indices = [header.index(x) for x in ('班級', '座號', '密碼')]
                 parsed = {}
+                assignments = {} if '謎底' in header and '謎面' in header else None
                 for row in rows[1:]:
                     if not any(str(x).strip() for x in row):
                         continue
@@ -51,9 +53,13 @@ class Roster:
                     if not re.fullmatch(r'[0-9]{5}', password) or student in parsed:
                         raise ValueError('名冊格式錯誤或重複')
                     parsed[student] = self.digest(student, password)
+                    if assignments is not None:
+                        assignments[student] = tuple(str(row[header.index(key)]).strip()
+                            if len(row) > header.index(key) else '' for key in ('謎底', '謎面'))
                 if not parsed:
                     raise ValueError('名冊尚無學生')
                 self.cache, self.loaded = parsed, time.monotonic()
+                self.assignments = assignments
             except Exception:
                 raise Unavailable('目前無法核對名冊，請稍後再試或通知老師。') from None
 
@@ -69,3 +75,7 @@ class Roster:
     def classes(self):
         self.refresh()
         return sorted({x.split(':')[0] for x in self.cache})
+
+    def assignment(self, student):
+        self.refresh()
+        return None if self.assignments is None else self.assignments.get(student, ('', ''))

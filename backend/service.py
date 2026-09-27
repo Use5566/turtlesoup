@@ -84,17 +84,30 @@ class Service:
         with self.lock, self.store.transaction() as db:
             db.execute(delete(Login).where(Login.digest == self.token_hash(token)))
 
-    def puzzles(self):
+    def puzzles(self, student=None):
         try:
             path = self.settings.path(self.settings.puzzles_path)
+            assignment = self.roster.assignment(student) if student is not None else None
+            if assignment is not None:
+                answer, surface = assignment
+                if not answer or not surface:
+                    return []
+                # Only a basename in the configured puzzle directory may be selected.
+                if any(c in answer for c in '/\\:') or answer in ('.', '..'):
+                    raise ValueError()
+                filename = answer if answer.lower().endswith('.txt') else answer + '.txt'
+                directory = path.parent.resolve()
+                path = directory / filename
+                if path.resolve().parent != directory:
+                    raise ValueError()
             text = path.read_text(encoding='utf-8-sig')
             if path.suffix.lower() == '.txt':
                 # A plain TXT is a visible reading passage and the judging reference.
                 # Never invent a hidden solution that the teacher did not provide.
-                surface = text.strip()
+                surface = assignment[1] if assignment is not None else text.strip()
                 data = [{'id': 'txt-' + hashlib.sha256(path.name.encode()).hexdigest()[:12],
-                         'version': '1', 'title': path.stem, 'surface': surface,
-                         'solution': surface, 'facts': [], 'max_turns': 30}]
+                         'version': '1', 'title': '海龜湯挑戰' if assignment is not None else path.stem, 'surface': surface,
+                         'solution': text.strip(), 'facts': [], 'max_turns': 30}]
             else:
                 data = json.loads(text)
             if not isinstance(data, list) or not data:
@@ -114,11 +127,11 @@ class Service:
         except Exception:
             raise Problem(503, '活動題目尚未準備完成，請通知老師。') from None
 
-    def activities(self):
-        return [{'id': p['id'], 'title': p['title'], 'version': p['revision_key']} for p in self.puzzles() if p.get('enabled', True)]
+    def activities(self, student=None):
+        return [{'id': p['id'], 'title': p['title'], 'version': p['revision_key']} for p in self.puzzles(student) if p.get('enabled', True)]
 
     def start(self, student, activity):
-        puzzle = next((p for p in self.puzzles() if p['id'] == activity and p.get('enabled', True)), None)
+        puzzle = next((p for p in self.puzzles(student) if p['id'] == activity and p.get('enabled', True)), None)
         if not puzzle:
             raise Problem(404, '活動尚未開放。')
         with self.lock, self.store.transaction() as db:
@@ -166,7 +179,7 @@ class Service:
                 return self.turn_json(old)
             if g.state != 'active':
                 raise Problem(409, '這個場次已結束。')
-            if not any(p['id'] == g.activity and p['revision_key'] == g.version and p.get('enabled', True) for p in self.puzzles()):
+            if not any(p['id'] == g.activity and p['revision_key'] == g.version and p.get('enabled', True) for p in self.puzzles(student)):
                 raise Problem(409, '活動已關閉或題目已更新，請返回活動列表。')
             previous = list(db.scalars(select(Turn).where(Turn.game_id == g.id).order_by(Turn.sequence)))
             if any(t.status == 'processing' for t in previous):
