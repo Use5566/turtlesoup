@@ -51,20 +51,13 @@ https://docs.google.com/spreadsheets/d/1CdLxYuVMC_YJ0hSRWoieaklwLJEdZHsi7MHVq-xy
 ./work/venv/Scripts/python.exe scripts/check_sheets.py
 ```
 
-權限就緒且準備啟用線上紀錄後，明確執行：
+正式七欄模式使用 `ROSTER_MODE=google`、`SHEETS_SYNC_ENABLED=true`。不需要建立額外紀錄分頁，也不要執行 `init_sheet_logs.py`。每 30 秒讀取指定 gid，以班級與座號對應學生，只寫 F（互動紀錄）、G（場次摘要）；A～E 保持原值。
 
-```powershell
-./work/venv/Scripts/python.exe scripts/init_sheet_logs.py --create
-```
+F、G 使用有縮排的 JSON，以請求 UUID／場次 UUID 為索引。F 含提問時間、問題、回答、模型、tokens 與處理狀態；G 含開始／更新時間、提問總數、場次狀態及 tokens。保留歷次場次與既有 UUID 紀錄，重試不重複新增。不要手動修改這兩欄；初次使用可留空。既有內容非指定格式時停止同步，不覆蓋原資料。
 
-只建立「海龜湯互動紀錄」「海龜湯場次摘要」，不改名冊。接著設 `SHEETS_SYNC_ENABLED=true` 並重啟。每 30 秒批次同步；未建立分頁、權限不足或網路錯誤時，紀錄保留在資料庫等待補送。
+讀取後會再次確認整列未變動，但 Google Sheets 不提供條件式寫入，因此使用期間請勿排序、移動或編輯名冊。跨同步週期的列順序變動會重新按身分對應。單格接近 49,000 UTF-16 單位時停止同步，資料保留於 PostgreSQL，需先封存紀錄。同步錯誤會持續重試，前台維持「等待試算表同步」。
 
-| 分頁 | 欄位 |
-| --- | --- |
-| 海龜湯互動紀錄 | 請求編號、紀錄時間、班級、座號、活動編號、場次編號、題目版本、提問序號、學生問題、問句類型、AI回答、處理狀態、模型、總tokens |
-| 海龜湯場次摘要 | 場次編號、班級、座號、活動編號、題目版本、開始時間、最後互動時間、提問總數、場次狀態、累計tokens、資料版本 |
-
-每題／每場固定一列。時間為 Asia/Taipei，座號保留前導零，RAW 寫入避免學生文字被執行為公式。請勿在原始紀錄分頁直接排序、插列、刪列或修改內容，分析請另製副本。UUID 不符就停止寫入，避免覆蓋別筆資料。資料庫與表格配對備份，不可清空資料庫後沿用舊表格。
+舊的 file 名冊開發模式仍可使用獨立分頁同步。正式七欄模式不使用該流程。
 
 tokens 採 API 的 `totalTokenCount`，不重複加快取；缺值標記「未提供／資料不完整」。模擬模式是 `local-mock`、0 tokens，並非真實 Gemini。中斷後未知的供應商費用不能視為零。
 
@@ -85,7 +78,7 @@ node --check web/app.js
 
 純 TXT 全文會顯示為謎面，同時作為 AI 判斷依據；標題取檔名。此測試文章沒有分開的湯底，程式不自動編造答案。檔案已公開在 GitHub，內容不是保密題庫。若需要隱藏湯底，仍使用原有 JSON 題庫。修改 TXT 後重新部署，內容雜湊會產生新活動版本，舊場次仍保留原文。
 
-`AI_MODE=mock` 不會進行自由問答判斷，TXT 未設定固定模擬答案；要測試真實 AI，由使用者設定 `AI_MODE=gemini` 和 `GEMINI_API_KEY`。`GEMINI_MAX_OUTPUT_TOKENS` 使用 `1024`，不可填 `50`。本次不呼叫付費模型、不操作 Render，也不修改 Google 試算表。六欄試算表的 D～F 同步仍待接入，目前同步器使用獨立紀錄分頁。
+`AI_MODE=mock` 不會進行自由問答判斷，TXT 未設定固定模擬答案；要測試真實 AI，由使用者設定 `AI_MODE=gemini` 和 `GEMINI_API_KEY`。`GEMINI_MAX_OUTPUT_TOKENS` 使用 `1024`，不可填 `50`。本次不呼叫付費模型、不操作 Render，也不修改 Google 試算表。正式七欄名冊改由 F、G 保存紀錄。
 
 ## 七欄名冊指定題目（優先於純 TXT 全文模式）
 
@@ -93,4 +86,4 @@ node --check web/app.js
 
 Render 保持 `ROSTER_MODE=google`、`GOOGLE_ROSTER_GID=0`，並設定 `PUZZLES_PATH=歐氏尖吻鮫.txt`。名冊更新最多快取 30 秒；TXT 更新需重新部署。只有未包含這兩欄的舊名冊才使用前述純 TXT 全文模式。公開 GitHub 的 TXT 仍可由原始碼瀏覽，此修改只防止遊戲介面直接顯示答案。
 
-「互動紀錄」「場次摘要」兩欄尚未串接寫入，現有同步仍使用獨立分頁；本次未變更試算表內容或 Render 設定。
+「互動紀錄」「場次摘要」已串接 F、G 欄；啟用 SHEETS_SYNC_ENABLED=true 後每 30 秒同步。

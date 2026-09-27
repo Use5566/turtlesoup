@@ -7,6 +7,7 @@ from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
 from sqlalchemy import select
 from .models import Game, Turn
+from .roster import normalize
 
 TURN_TAB = '海龜湯互動紀錄'
 GAME_TAB = '海龜湯場次摘要'
@@ -84,6 +85,8 @@ class GoogleSheets:
             self.request('POST', ':batchUpdate', json={'requests': requests})
 
     def write_rows(self, rows):
+        if self.settings.roster_mode == 'google':
+            return self.write_student_records(rows)
         props = {s['properties']['title']: s['properties'] for s in self.metadata()['sheets']}
         ranges, writes, grow = [], [], []
         required = {r[0] for r in rows}
@@ -112,6 +115,56 @@ class GoogleSheets:
                 raise ValueError('試算表資料列已移動或資料庫版本不符，停止同步以保留既有紀錄')
         # RAW prevents formula execution, including malicious student questions.
         self.request('POST', '/values:batchUpdate', json={'valueInputOption': 'RAW', 'data': writes})
+
+    def write_student_records(self, rows):
+        """Merge UUID-keyed history into F/G, preserving earlier database histories."""
+        with self.lock:
+            props = next(p['properties'] for p in self.metadata()['sheets']
+                         if p['properties']['sheetId'] == self.settings.google_roster_gid)
+            tab = props['title']
+            snapshot = self.values(tab, 'A1:G' + str(min(props['gridProperties']['rowCount'], 2000)))
+            expected = ['班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要']
+            if not snapshot or [str(v).strip() for v in snapshot[0]] != expected:
+                raise ValueError('名冊必須依序包含七欄：' + '、'.join(expected))
+            index = {}
+            for number, cells in enumerate(snapshot[1:], 2):
+                if not any(str(v).strip() for v in cells):
+                    continue
+                student = normalize(cells[0], cells[1])
+                if student in index:
+                    raise ValueError('名冊學生重複，停止同步')
+                index[student] = (number, cells)
+            pending = {}
+            for kind, _, values in rows:
+                student = normalize(values[2], values[3]) if kind == TURN_TAB else normalize(values[1], values[2])
+                if student not in index:
+                    raise ValueError('紀錄所屬學生不在名冊，停止同步')
+                number, cells = index[student]
+                if student not in pending:
+                    history = []
+                    for col in (5, 6):
+                        raw = cells[col] if len(cells) > col else ''
+                        obj = json.loads(raw) if raw else {}
+                        if not isinstance(obj, dict) or any(not isinstance(v, dict) for v in obj.values()):
+                            raise ValueError('既有紀錄格式不符，保留原內容')
+                        history.append(obj)
+                    pending[student] = history
+                col = 0 if kind == TURN_TAB else 1
+                headers = TURN_HEADERS if col == 0 else GAME_HEADERS
+                pending[student][col][str(values[0])] = dict(zip(headers, values))
+            writes = []
+            for student, history in pending.items():
+                number, cells = index[student]
+                serialized = [json.dumps(obj, ensure_ascii=False, indent=2) for obj in history]
+                if any(len(value.encode('utf-16-le')) // 2 > 49000 for value in serialized):
+                    raise ValueError('紀錄接近單格容量上限，資料保留於資料庫，請封存試算表紀錄')
+                # Detect edits or row moves since the initial read. Teachers should not
+                # sort/edit the roster during a sync; Sheets has no conditional writes.
+                if self.values(tab, f'A{number}:G{number}') != [cells]:
+                    raise ValueError('名冊同步期間變更，稍後重新對應')
+                writes.append({'range': address(tab, f'F{number}:G{number}'), 'values': [serialized]})
+            if writes:
+                self.request('POST', '/values:batchUpdate', json={'valueInputOption': 'RAW', 'data': writes})
 
 
 class Syncer:
