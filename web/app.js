@@ -82,7 +82,7 @@ async function activities() {
           if (epoch !== generation || !token) return;
           game = result;
           pending = null; $("question").value = game.draft || "";
-          $("question-type").value = game.draft_kind || "is"; updateCount(); $("game-error").textContent = "";
+          updateCount(); $("game-error").textContent = "";
           renderGame(); show("game");
         } catch (e) { $("activity-error").textContent = e.message; } finally { button.disabled = false; }
       });
@@ -98,13 +98,13 @@ function renderGame() {
   $("question-form").hidden = game.state === "finished";
   $("finish").disabled = busy || !!pending || game.state === "finished" || game.turns.some(t => t.status === "processing");
   $("send").disabled = busy || !!pending || game.turns.length >= game.max_turns || game.turns.some(t => t.status === "processing");
-  $("question").disabled = busy || !!pending; $("question-type").disabled = busy || !!pending;
+  $("question").disabled = busy || !!pending;
   $("retry").hidden = !pending; $("retry").disabled = busy;
   $("mock-help").hidden = mode !== "mock"; $("mock-examples").replaceChildren();
   for (const example of game.mock_examples || []) {
     const button = document.createElement("button"); button.textContent = example.question;
     button.disabled = busy || !!pending || game.state === "finished";
-    button.addEventListener("click", () => { $("question").value = example.question; $("question-type").value = example.type; updateCount(); $("question").focus(); });
+    button.addEventListener("click", () => { $("question").value = example.question; updateCount(); $("question").focus(); });
     $("mock-examples").append(button);
   }
   const container = $("messages"), oldScroll = container.scrollTop, nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
@@ -139,7 +139,7 @@ $("question-form").addEventListener("submit", async event => {
   event.preventDefault(); if (busy || pending || !game || !$("question").value.trim()) return;
   if (saving) { try { await saving; } catch { /* Submission retries the cloud save. */ } }
   if (!game || !token || busy || pending) return;
-  pending = { request_id: crypto.randomUUID(), question: $("question").value.trim(), question_type: $("question-type").value };
+  pending = { request_id: crypto.randomUUID(), question: $("question").value.trim() };
   await sendPending();
 });
 async function sendPending() {
@@ -194,7 +194,7 @@ function saveDraft() {
   if (saving) return saving.then(() => saveDraft());
   if (!game || !token || game.state !== "active" || busy || pending) return Promise.resolve();
   const uid = game.id, epoch = generation;
-  const body = JSON.stringify({question: $("question").value, question_type: $("question-type").value});
+  const body = JSON.stringify({question: $("question").value});
   saving = api("/api/games/" + uid + "/save", {method: "POST", body})
     .then(result => {
       if (epoch === generation && game?.id === uid) {

@@ -22,7 +22,6 @@ function harness() {
   vm.runInContext(fs.readFileSync('web/app.js', 'utf8'), context);
   vm.runInContext("token='test'; game={id:'game',state:'active'}", context);
   element('question').value = '尚未送出的草稿';
-  element('question-type').value = 'has';
   return {context, elements, intervals, calls};
 }
 
@@ -31,7 +30,7 @@ test('35 second autosave posts draft, without submitting an AI question', async 
   assert.ok(h.intervals.some(x => x.delay === 35000));
   await vm.runInContext('saveDraft()', h.context);
   const request = h.calls.find(x => x.url.endsWith('/save'));
-  assert.deepEqual(JSON.parse(request.options.body), {question: '尚未送出的草稿', question_type: 'has'});
+  assert.deepEqual(JSON.parse(request.options.body), {question: '尚未送出的草稿'});
   assert.equal(request.options.headers.Authorization, 'Bearer test');
   assert.ok(h.elements.get('sync-status').textContent.includes('已儲存'));
   assert.equal(h.calls.filter(x => x.url.endsWith('/questions')).length, 0);

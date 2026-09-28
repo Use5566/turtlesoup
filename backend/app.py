@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from .config import Settings, ROOT
 from .models import Store
 from .roster import Roster, Unavailable, normalize
-from .ai import Gemini, MockAI
+from .ai import Gemini, MockAI, infer_kind
 from .service import Service, Problem
 from .sheets import GoogleSheets, Syncer
 from .sheet_state import restore
@@ -33,12 +33,12 @@ class QuestionInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     request_id: UUID
     question: str = Field(min_length=1, max_length=300)
-    question_type: str = Field(pattern=r'^(is|correct|will|has|may|can)$')
+    question_type: str | None = Field(default=None, pattern=r'^(is|correct|will|has|may|can)$')
 
 
 class DraftInput(BaseModel):
     question: str = Field(max_length=300)
-    question_type: str = Field(pattern=r'^(is|correct|will|has|may|can)$')
+    question_type: str | None = Field(default=None, pattern=r'^(is|correct|will|has|may|can)$')
 
 
 def create_app(settings=None, roster=None, ai=None, google=None):
@@ -177,13 +177,13 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.post('/api/games/{uid}/questions')
     def ask(uid: UUID, body: QuestionInput, sid=Depends(student)):
-        result = service.ask(sid, str(uid), str(body.request_id), body.question, body.question_type)
+        result = service.ask(sid, str(uid), str(body.request_id), body.question, body.question_type or infer_kind(body.question))
         checkpoint()
         return result
 
     @app.post('/api/games/{uid}/save')
     def save(uid: UUID, body: DraftInput, sid=Depends(student)):
-        service.save_draft(sid, str(uid), body.question, body.question_type)
+        service.save_draft(sid, str(uid), body.question, body.question_type or infer_kind(body.question))
         checkpoint()
         return service.game(sid, str(uid))
 
