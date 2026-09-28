@@ -8,6 +8,7 @@ import uuid
 from sqlalchemy import select, delete, func
 from .ai import AIError, display, PAIRS
 from .models import Login, Game, Turn, Limit, utcnow
+from .puzzle_files import resolve_puzzle
 
 
 MESSAGES = {'rephrase': '請改成一個可用肯定或否定回答的問題。',
@@ -95,14 +96,7 @@ class Service:
                 answer, surface = assignment
                 if not answer or not surface:
                     return []
-                # Only a basename in the configured puzzle directory may be selected.
-                if any(c in answer for c in '/\\:') or answer in ('.', '..'):
-                    raise ValueError()
-                filename = answer if answer.lower().endswith('.txt') else answer + '.txt'
-                directory = path.parent.resolve()
-                path = directory / filename
-                if path.resolve().parent != directory:
-                    raise ValueError()
+                path = resolve_puzzle(path.parent, answer)
             text = path.read_text(encoding='utf-8-sig')
             if path.suffix.lower() == '.txt':
                 # A plain TXT is a visible reading passage and the judging reference.

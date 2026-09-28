@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from .models import Game, Turn
 from .roster import normalize
+from .puzzle_files import resolve_puzzle
 
 GAME_FIELDS = ('uid', 'student', 'activity', 'version', 'puzzle', 'state', 'started',
                'updated', 'revision', 'draft', 'draft_kind')
@@ -38,8 +39,7 @@ def restore(store, google):
                     answer = str(row[3]).strip()
                     if not answer or any(c in answer for c in '/\\:'):
                         raise ValueError('既有題目資料無法恢復')
-                    path = google.settings.path(google.settings.puzzles_path).parent / (
-                        answer if answer.lower().endswith('.txt') else answer + '.txt')
+                    path = resolve_puzzle(google.settings.path(google.settings.puzzles_path).parent, answer)
                     puzzle = {'title': '海龜湯挑戰', 'surface': row[4],
                               'solution': path.read_text(encoding='utf-8-sig').strip(), 'max_turns': 30}
                     def iso(value):
