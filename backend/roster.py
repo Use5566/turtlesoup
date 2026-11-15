@@ -44,7 +44,7 @@ class Roster:
                 header = [str(x).strip() for x in rows[0]]
                 indices = [header.index(x) for x in ('班級', '座號', '密碼')]
                 parsed = {}
-                assignments = {} if '謎底' in header and '謎面' in header else None
+                assignments = {} if '謎面' in header else None
                 for row in rows[1:]:
                     if not any(str(x).strip() for x in row):
                         continue
@@ -54,10 +54,12 @@ class Roster:
                         raise ValueError('名冊格式錯誤或重複')
                     parsed[student] = self.digest(student, password)
                     if assignments is not None:
-                        assignments[student] = tuple(str(row[header.index(key)]).strip()
-                            if len(row) > header.index(key) else '' for key in ('謎底', '謎面'))
-                if not parsed:
-                    raise ValueError('名冊尚無學生')
+                        if '謎底' in header:
+                            assignments[student] = tuple(str(row[header.index(key)]).strip()
+                                if len(row) > header.index(key) else '' for key in ('謎底', '謎面'))
+                        else:
+                            i = header.index('謎面')
+                            assignments[student] = (str(row[i]).strip() if len(row) > i else '', None)
                 self.cache, self.loaded = parsed, time.monotonic()
                 self.assignments = assignments
             except Exception:

@@ -164,6 +164,18 @@ class GoogleSheets:
                     raise ValueError('名冊學生重複，停止同步')
                 index[student] = (number, cells)
             pending = {}
+            if self.settings.google_roster_sheet_id:
+                students = {normalize(v[2], v[3]) if kind == TURN_TAB else normalize(v[1], v[2])
+                            for kind, _, v in rows}
+                missing = sorted(students - index.keys())
+                if missing:
+                    if len(snapshot) + len(missing) > 2000:
+                        raise ValueError('紀錄表容量不足')
+                    # No passwords are copied from the independent login roster.
+                    self.request('POST', '/values/' + quote(address(tab, 'A:G'), safe='') + ':append',
+                        params={'valueInputOption': 'RAW', 'insertDataOption': 'INSERT_ROWS'},
+                        json={'values': [[*student.split(':'), '', '', '', '', ''] for student in missing]})
+                    return self.write_student_records(rows, migrate)
             def history_for(student, number, cells):
                 history = []
                 for col in (5, 6):

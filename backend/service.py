@@ -9,6 +9,7 @@ from sqlalchemy import select, delete, func
 from .ai import AIError, display, PAIRS
 from .models import Login, Game, Turn, Limit, utcnow
 from .puzzle_files import resolve_puzzle
+from .puzzle_files import puzzle_surface
 
 
 MESSAGES = {'rephrase': '請改成一個可用肯定或否定回答的問題。',
@@ -94,9 +95,11 @@ class Service:
             assignment = self.roster.assignment(student) if student is not None else None
             if assignment is not None:
                 answer, surface = assignment
-                if not answer or not surface:
+                if not answer or surface == '':
                     return []
                 path = resolve_puzzle(path.parent, answer)
+                if surface is None:
+                    assignment = (answer, puzzle_surface(path))
             text = path.read_text(encoding='utf-8-sig')
             if path.suffix.lower() == '.txt':
                 # A plain TXT is a visible reading passage and the judging reference.

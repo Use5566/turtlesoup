@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from contextlib import asynccontextmanager
 import threading
 from uuid import UUID
@@ -46,7 +47,8 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     settings.validate()
     store = Store(settings)
     google = google or GoogleSheets(settings)
-    roster = roster or Roster(settings, google)
+    roster_google = GoogleSheets(replace(settings, google_sheet_id=settings.google_roster_sheet_id)) if settings.google_roster_sheet_id else google
+    roster = roster or Roster(settings, roster_google)
     ai = ai or (MockAI() if settings.ai_mode == 'mock' else Gemini(settings))
     service = Service(settings, store, roster, ai)
     syncer = Syncer(store, google)

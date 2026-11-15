@@ -25,6 +25,7 @@ class Settings:
     session_seconds: int = 7200
     sync_seconds: int = 30
     sheet_storage: bool = False
+    google_roster_sheet_id: str = ''
 
     @classmethod
     def from_env(cls):
@@ -39,6 +40,7 @@ class Settings:
                 app_mode='production', ai_mode='gemini', roster_mode='google',
                 sheets_sync_enabled=True, puzzles_path='歐氏尖吻鮫.txt',
                 sheet_storage=True, sync_seconds=35,
+                google_roster_sheet_id='17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw',
                 allowed_origins='https://turtlesoup-ytac.onrender.com',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),
