@@ -1,6 +1,7 @@
 """Readable F–K projection. Recovery data lives in a separate hidden sheet."""
 import hashlib
 import json
+import time
 from .readable_records import decode, STATUS
 from .roster import normalize
 
@@ -8,12 +9,16 @@ HEADERS = ['班級', '座號', '密碼', '謎面1', '謎面2', '作答狀況',
            '謎面1互動紀錄', '謎面1場次摘要', '謎面2互動紀錄', '謎面2場次摘要', '累計總Token']
 
 
-def read_core(google):
-    props = next(s['properties'] for s in google.metadata()['sheets']
+def read_core(google, snapshot=None):
+    metadata = snapshot[0] if snapshot else google.metadata()
+    props = next(s['properties'] for s in metadata['sheets']
                  if s['properties']['sheetId'] == google.settings.google_roster_gid)
     tab = props['title'].replace("'", "''")
-    result = google.request('GET', params={'ranges': f"'{tab}'!A1:K{min(props['gridProperties']['rowCount'], 2000)}",
-        'includeGridData': 'true', 'fields': 'sheets.data(startRow,rowData.values(formattedValue,userEnteredValue,note))'})
+    if snapshot:
+        result = {'sheets': [x for x in snapshot[1]['sheets'] if x['properties']['sheetId'] == props['sheetId']]}
+    else:
+        result = google.request('GET', params={'ranges': f"'{tab}'!A1:K{min(props['gridProperties']['rowCount'], 2000)}",
+            'includeGridData': 'true', 'fields': 'sheets.data(startRow,rowData.values(formattedValue,userEnteredValue,note))'})
     rows = []
     for sheet in result.get('sheets', []):
         for grid in sheet.get('data', []):
@@ -98,8 +103,9 @@ def projection(student, cells, turns, games):
 def write_core(google, incoming, initialize=False):
     from .sheets import TURN_TAB, TURN_HEADERS, GAME_HEADERS
     with google.lock:
-        props, index = read_core(google)
-        storage, stored, setup = read_storage(google)
+        state = read_snapshot(google)
+        props, index = read_core(google, state)
+        storage, stored, setup = read_storage(google, state)
         pending = {s: histories(s, c, stored) for s, (_, c) in index.items()} if initialize else {}
         for kind, _, values in incoming:
             student = normalize(values[2], values[3]) if kind == TURN_TAB else normalize(values[1], values[2])
@@ -135,12 +141,15 @@ def write_core(google, incoming, initialize=False):
                 'rows': [{'values': output}], 'fields': 'userEnteredValue,note'}})
         if requests:
             # Re-read before writing; no atomic compare-and-swap exists in Sheets.
-            _, current = read_core(google)
-            if read_storage(google)[1] != stored:
+            state = read_snapshot(google)
+            _, current = read_core(google, state)
+            if read_storage(google, state)[1] != stored:
                 raise ValueError("恢復資料已變動，稍後重試")
             if any(current.get(student) != index[student] for student in pending):
                 raise ValueError('名冊已變動，稍後重試')
             google.request('POST', ':batchUpdate', json={'requests': requests})
+            if setup:
+                google._core_metadata = None
 
 
 def recovery_core(google):
@@ -165,8 +174,9 @@ def pack(records):
     return value
 
 
-def read_storage(google):
-    props = [s['properties'] for s in google.metadata()['sheets']]
+def read_storage(google, snapshot=None):
+    metadata = snapshot[0] if snapshot else google.metadata()
+    props = [s['properties'] for s in metadata['sheets']]
     storage = next((p for p in props if p['title'] == STORAGE_TITLE), None)
     if storage is None:
         storage = {'sheetId': max(p['sheetId'] for p in props) + 1,
@@ -176,7 +186,13 @@ def read_storage(google):
             'start': {'sheetId': storage['sheetId'], 'rowIndex': 0, 'columnIndex': 0},
             'rows': [{'values': [{'userEnteredValue': {'stringValue': h}} for h in STORAGE_HEADERS]}],
             'fields': 'userEnteredValue'}}]
-    rows = google.values(STORAGE_TITLE, 'A1:C' + str(min(storage['gridProperties']['rowCount'], 2000)))
+    if snapshot:
+        sheet = next(x for x in snapshot[1]['sheets'] if x['properties']['sheetId'] == storage['sheetId'])
+        rows = [[c.get('formattedValue', '') for c in row.get('values', [])]
+                for grid in sheet.get('data', []) for row in grid.get('rowData', [])]
+        rows = [row[:3] for row in rows]
+    else:
+        rows = google.values(STORAGE_TITLE, 'A1:C' + str(min(storage['gridProperties']['rowCount'], 2000)))
     if not rows or rows[0] != STORAGE_HEADERS:
         raise ValueError('恢復分頁格式不符，保留原資料')
     stored = {}
@@ -187,3 +203,26 @@ def read_storage(google):
             raise ValueError('恢復資料重複或格式不符')
         stored[row[0]] = (n, [decode(row[1], '', row[0]), decode(row[2], '', row[0])])
     return storage, stored, []
+
+
+def read_snapshot(google):
+    # Cache layout only, never student data. Read both bounded ranges together.
+    from .sheets import address
+    cached = getattr(google, '_core_metadata', None)
+    if cached is None or time.monotonic() - cached[0] > 60:
+        cached = (time.monotonic(), google.metadata())
+        google._core_metadata = cached
+    metadata = cached[1]
+    ranges = []
+    for sheet in metadata['sheets']:
+        p = sheet['properties']
+        if p['sheetId'] == google.settings.google_roster_gid:
+            end = 'K'
+        elif p['title'] == STORAGE_TITLE:
+            end = 'C'
+        else:
+            continue
+        ranges.append(address(p['title'], 'A1:' + end + str(min(p['gridProperties']['rowCount'], 2000))))
+    result = google.request('GET', params={'ranges': ranges, 'includeGridData': 'true',
+        'fields': 'sheets(properties.sheetId,data(startRow,rowData.values(formattedValue,userEnteredValue,note)))'})
+    return metadata, result

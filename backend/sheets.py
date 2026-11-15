@@ -45,6 +45,13 @@ class GoogleSheets:
                 raise RuntimeError('Google Sheets 請求失敗：HTTP ' + str(response.status_code))
             return response.json()
 
+    def close(self):
+        with self.lock:
+            if self.session is not None:
+                self.session.close()
+                self.session = None
+            self._core_metadata = None
+
     def metadata(self):
         return self.request('GET', params={'fields': 'sheets.properties,properties.title'})
 

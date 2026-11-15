@@ -23,6 +23,7 @@ class CoreSheet(GoogleSheets):
         self.fail = False
         self.fail_after = False
         self.writes = 0
+        self.reads = 0
 
     def metadata(self):
         sheets = [{'properties': {'sheetId': 0, 'title': '名冊', 'gridProperties': {'rowCount': 100}}}]
@@ -38,8 +39,13 @@ class CoreSheet(GoogleSheets):
         if self.fail:
             raise OSError('offline')
         if method == 'GET':
-            return {'sheets': [{'data': [{'startRow': 0, 'rowData': [
-                {'values': copy.deepcopy(r)} for r in self.table]}]}]}
+            self.reads += 1
+            sheets = [{'properties': {'sheetId': 0}, 'data': [{'startRow': 0, 'rowData': [
+                {'values': copy.deepcopy(r)} for r in self.table]}]}]
+            if isinstance(kwargs.get('params', {}).get('ranges'), list) and self.hidden is not None:
+                sheets.append({'properties': {'sheetId': self.hidden_props['sheetId']},
+                    'data': [{'startRow': 0, 'rowData': [{'values': copy.deepcopy(r)} for r in self.hidden]}]})
+            return {'sheets': sheets}
         assert suffix == ':batchUpdate'
         for r in kwargs['json']['requests']:
             if 'addSheet' in r:
@@ -116,6 +122,7 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
         for col, encoded in [(5, stored[1]), (6, stored[2])]:
             g.table[n][col]['note'] = cell(json.loads(encoded['formattedValue']), student)['note']
     g.hidden = g.hidden_props = None
+    g._core_metadata = None
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         h = login(c)
         assert c.get('/api/games/'+ids[0], headers=h).json()['state'] == 'finished'
@@ -171,3 +178,32 @@ def test_migrate_notes_atomically_and_reorder_roster(settings, ai, tmp_path):
     assert g.hidden == before
     rows = g.recovery_rows()
     assert [r[:2] for r in rows[1:]] == [['1','02'], ['1','01']]
+
+
+def test_changed_draft_uses_two_combined_reads(settings, ai, tmp_path):
+    g = prepare(settings, tmp_path)
+    with TestClient(create_app(settings, ai=ai, google=g)) as c:
+        h = login(c)
+        a = c.get('/api/activities', headers=h).json()['activities'][0]
+        game = c.post('/api/games', headers=h, json={'activity': a['id']}).json()
+        before = g.reads
+        assert c.post('/api/games/'+game['id']+'/save', headers=h, json={'question':'新草稿'}).status_code == 200
+        assert g.reads - before == 2
+
+
+def test_startup_failure_releases_connections(settings, ai, tmp_path):
+    g = prepare(settings, tmp_path)
+    app = create_app(settings, ai=ai, google=g)
+    closed = []
+    close, dispose = g.close, app.state.service.store.engine.dispose
+    def close_google():
+        close(); closed.append('google')
+    def close_database():
+        dispose(); closed.append('database')
+    g.close = close_google
+    app.state.service.store.engine.dispose = close_database
+    g.fail = True
+    with pytest.raises(OSError):
+        with TestClient(app):
+            pass
+    assert closed == ['google', 'database']

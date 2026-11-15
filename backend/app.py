@@ -73,25 +73,31 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        if settings.sheet_storage:
-            await asyncio.to_thread(google.write_student_records, [], True)
-            await asyncio.to_thread(restore, store, google)
-        service.recover()
-        await asyncio.to_thread(checkpoint)
         worker = None
-        if settings.sheets_sync_enabled:
-            worker = threading.Thread(target=sync_loop, daemon=True)
-            worker.start()
-        yield
-        stop.set()
-        if worker:
-            await asyncio.to_thread(worker.join, 25)
-        if settings.sheet_storage:
-            try:
-                await asyncio.to_thread(checkpoint)
-            except Problem:
-                pass
-        store.engine.dispose()
+        try:
+            if settings.sheet_storage:
+                await asyncio.to_thread(google.write_student_records, [], True)
+                await asyncio.to_thread(restore, store, google)
+            service.recover()
+            await asyncio.to_thread(checkpoint)
+            if settings.sheets_sync_enabled:
+                worker = threading.Thread(target=sync_loop, daemon=True)
+                worker.start()
+            yield
+        finally:
+            stop.set()
+            if worker:
+                await asyncio.to_thread(worker.join)
+            if settings.sheet_storage:
+                try:
+                    await asyncio.to_thread(checkpoint)
+                except Problem:
+                    pass
+            for connection in [google] + ([roster_google] if roster_google is not google else []):
+                close = getattr(connection, 'close', None)
+                if close:
+                    close()
+            store.engine.dispose()
 
     app = FastAPI(title='turtlesoup', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.service, app.state.syncer = service, syncer
@@ -142,7 +148,8 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     def config():
         return {'mode': settings.ai_mode, 'classes': roster.classes(),
                 'sheets_enabled': settings.sheets_sync_enabled,
-                'record_layout': 'core-fk-v2' if settings.core_records else 'legacy'}
+                'record_layout': 'core-fk-v2' if settings.core_records else 'legacy',
+                'build': '20261116-batched'}
 
     @app.post('/api/login')
     def login(body: LoginInput, request: Request):
