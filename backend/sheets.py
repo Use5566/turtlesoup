@@ -129,6 +129,9 @@ class GoogleSheets:
         return notes
 
     def recovery_rows(self):
+        if self.settings.core_records:
+            from .core_records import recovery_core
+            return recovery_core(self)
         props = next(s['properties'] for s in self.metadata()['sheets']
                      if s['properties']['sheetId'] == self.settings.google_roster_gid)
         rows = self.roster_rows(self.settings.google_roster_gid)
@@ -145,6 +148,9 @@ class GoogleSheets:
 
     def write_student_records(self, rows, migrate=False):
         """Merge UUID-keyed history into F/G, preserving earlier database histories."""
+        if self.settings.core_records:
+            from .core_records import write_core
+            return write_core(self, rows, migrate)
         with self.lock:
             props = next(p['properties'] for p in self.metadata()['sheets']
                          if p['properties']['sheetId'] == self.settings.google_roster_gid)

@@ -141,7 +141,8 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     @app.get('/api/config')
     def config():
         return {'mode': settings.ai_mode, 'classes': roster.classes(),
-                'sheets_enabled': settings.sheets_sync_enabled}
+                'sheets_enabled': settings.sheets_sync_enabled,
+                'record_layout': 'core-fk-v1' if settings.core_records else 'legacy'}
 
     @app.post('/api/login')
     def login(body: LoginInput, request: Request):
