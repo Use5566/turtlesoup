@@ -13,7 +13,7 @@ class Unavailable(Exception):
 
 def normalize(classroom, seat):
     classroom, seat = str(classroom).strip(), str(seat).strip()
-    if not re.fullmatch(r'[0-9]{3}', classroom) or not re.fullmatch(r'[0-9]{1,2}', seat) or not 1 <= int(seat) <= 99:
+    if not re.fullmatch(r'[0-9]{1,3}', classroom) or not re.fullmatch(r'[0-9]{1,2}', seat) or not 1 <= int(seat) <= 99:
         raise ValueError('班級或座號格式不正確')
     return classroom + ':' + seat.zfill(2)
 
@@ -44,7 +44,8 @@ class Roster:
                 header = [str(x).strip() for x in rows[0]]
                 indices = [header.index(x) for x in ('班級', '座號', '密碼')]
                 parsed = {}
-                assignments = {} if '謎面' in header else None
+                multi = [key for key in ('謎面1', '謎面2') if key in header]
+                assignments = {} if '謎面' in header or multi else None
                 for row in rows[1:]:
                     if not any(str(x).strip() for x in row):
                         continue
@@ -54,7 +55,11 @@ class Roster:
                         raise ValueError('名冊格式錯誤或重複')
                     parsed[student] = self.digest(student, password)
                     if assignments is not None:
-                        if '謎底' in header:
+                        if multi:
+                            assignments[student] = list(dict.fromkeys(
+                                (str(row[header.index(key)]).strip(), None) for key in multi
+                                if len(row) > header.index(key) and str(row[header.index(key)]).strip()))
+                        elif '謎底' in header:
                             assignments[student] = tuple(str(row[header.index(key)]).strip()
                                 if len(row) > header.index(key) else '' for key in ('謎底', '謎面'))
                         else:

@@ -16,7 +16,7 @@ def test_render_only_two_settings(render_env):
     s = Settings.from_env()
     assert (s.app_mode, s.ai_mode, s.roster_mode) == ('production', 'gemini', 'google')
     assert s.sheets_sync_enabled
-    assert s.puzzles_path == '歐氏尖吻鮫.txt'
+    assert s.puzzles_path == '臺灣藍鵲.txt'
     assert s.allowed_origins == 'https://turtlesoup-ytac.onrender.com'
     assert s.google_roster_gid == 0
     assert s.gemini_model == 'gemini-3.5-flash-lite'

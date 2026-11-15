@@ -2,9 +2,9 @@ import pytest
 from backend.puzzle_files import resolve_puzzle
 
 
-@pytest.mark.parametrize('name', ['海螺', '海螺.txt', '海螺.TXT', '麟角腹足海螺'])
+@pytest.mark.parametrize('name', ['臺灣藍鵲', '臺灣藍鵲.txt', '臺灣藍鵲.TXT'])
 def test_snail_alias_and_extension_case(tmp_path, name):
-    path = tmp_path / '海螺.TXT'
+    path = tmp_path / '臺灣藍鵲.TXT'
     path.write_text('測試', encoding='utf-8')
     assert resolve_puzzle(tmp_path, name) == path
 

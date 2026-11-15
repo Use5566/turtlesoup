@@ -89,10 +89,12 @@ class Service:
         with self.lock, self.store.transaction() as db:
             db.execute(delete(Login).where(Login.digest == self.token_hash(token)))
 
-    def puzzles(self, student=None):
+    def puzzles(self, student=None, assignment_override=None):
         try:
             path = self.settings.path(self.settings.puzzles_path)
-            assignment = self.roster.assignment(student) if student is not None else None
+            assignment = assignment_override if assignment_override is not None else (self.roster.assignment(student) if student is not None else None)
+            if isinstance(assignment, list):
+                return [p for item in assignment for p in self.puzzles(student, item)]
             if assignment is not None:
                 answer, surface = assignment
                 if not answer or surface == '':
@@ -108,6 +110,7 @@ class Service:
                 data = [{'id': 'txt-' + hashlib.sha256(path.name.encode()).hexdigest()[:12],
                          'version': '1', 'title': '海龜湯挑戰' if assignment is not None else path.stem, 'surface': surface,
                          'solution': text.strip(), 'facts': [], 'max_turns': 30}]
+                data[0]['pending_solution'] = '【湯底】' in text and not text.split('【湯底】', 1)[1].strip()
             else:
                 data = json.loads(text)
             if not isinstance(data, list) or not data:
@@ -186,6 +189,8 @@ class Service:
             if any(t.status == 'processing' for t in previous):
                 raise Problem(409, '上一個問題仍在處理，請稍候。')
             puzzle = json.loads(g.puzzle)
+            if puzzle.get('pending_solution'):
+                raise Problem(503, '老師尚未提供這題的正式湯底，暫時無法提問。')
             if len(previous) >= puzzle.get('max_turns', 30):
                 raise Problem(409, '已達本場次提問上限。')
             history = [{'question': t.question, 'answer': t.answer} for t in previous if t.answer]

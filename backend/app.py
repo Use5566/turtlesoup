@@ -20,7 +20,7 @@ from .sheet_state import restore
 
 class LoginInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    classroom: str = Field(pattern=r'^[0-9]{3}$')
+    classroom: str = Field(pattern=r'^[0-9]{1,3}$')
     seat: str = Field(pattern=r'^[0-9]{1,2}$')
     password: str = Field(pattern=r'^[0-9]{5}$')
 

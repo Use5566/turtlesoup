@@ -9,7 +9,7 @@ from conftest import login
 
 def test_real_txt_end_to_end_and_revision(settings, ai, tmp_path):
     path = tmp_path / '歐氏尖吻鮫.txt'
-    original = (ROOT / path.name).read_text(encoding='utf-8-sig').strip()
+    original = '一隻動物帶著兩團東西。牠使用牠們防禦。'
     path.write_text('\ufeff' + original, encoding='utf-8')
     settings.puzzles_path = str(path)
     with TestClient(create_app(settings, ai=ai)) as client:

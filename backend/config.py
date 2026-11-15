@@ -38,7 +38,7 @@ class Settings:
                 raise ValueError('Render 缺少必要設定：' + '、'.join(missing))
             settings = cls(
                 app_mode='production', ai_mode='gemini', roster_mode='google',
-                sheets_sync_enabled=True, puzzles_path='歐氏尖吻鮫.txt',
+                sheets_sync_enabled=True, puzzles_path='臺灣藍鵲.txt',
                 sheet_storage=True, sync_seconds=35,
                 google_roster_sheet_id='17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw',
                 allowed_origins='https://turtlesoup-ytac.onrender.com',
