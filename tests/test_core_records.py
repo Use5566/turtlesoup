@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.app import create_app
 from backend.core_records import HEADERS, projection
 from backend.sheets import GoogleSheets
-from backend.readable_records import decode
+from backend.readable_records import decode, cell
 
 
 def literal(value):
@@ -18,15 +18,21 @@ class CoreSheet(GoogleSheets):
         super().__init__(settings)
         self.table = [[literal(v) for v in row] for row in [HEADERS,
             ['1', '1', '01234', 'alpha', 'beta'], ['1', '2', '23456', 'alpha', '']]]
+        self.hidden = None
+        self.hidden_props = None
         self.fail = False
         self.fail_after = False
         self.writes = 0
 
     def metadata(self):
-        return {'sheets': [{'properties': {'sheetId': 0, 'title': '名冊', 'gridProperties': {'rowCount': 100}}}]}
+        sheets = [{'properties': {'sheetId': 0, 'title': '名冊', 'gridProperties': {'rowCount': 100}}}]
+        if self.hidden_props:
+            sheets.append({'properties': self.hidden_props})
+        return {'sheets': sheets}
 
     def values(self, tab, cells):
-        return [[c.get('formattedValue', '') for c in r] for r in self.table]
+        table = self.table if tab == '名冊' else self.hidden
+        return [[c.get('formattedValue', '') for c in r] for r in table]
 
     def request(self, method, suffix='', **kwargs):
         if self.fail:
@@ -36,11 +42,20 @@ class CoreSheet(GoogleSheets):
                 {'values': copy.deepcopy(r)} for r in self.table]}]}]}
         assert suffix == ':batchUpdate'
         for r in kwargs['json']['requests']:
+            if 'addSheet' in r:
+                self.hidden_props = copy.deepcopy(r['addSheet']['properties'])
+                self.hidden = []
+                continue
             update = r['updateCells']; start = update['start']
-            assert start['columnIndex'] == 5
-            row = self.table[start['rowIndex']]
-            row.extend([{} for _ in range(max(0, 11-len(row)))])
-            for i, value in enumerate(update['rows'][0]['values'], 5):
+            table = self.table if start['sheetId'] == 0 else self.hidden
+            if start['sheetId'] == 0:
+                assert start['columnIndex'] == 5
+            while len(table) <= start['rowIndex']:
+                table.append([])
+            row = table[start['rowIndex']]
+            values = update['rows'][0]['values']
+            row.extend([{} for _ in range(max(0, start['columnIndex']+len(values)-len(row)))])
+            for i, value in enumerate(values, start['columnIndex']):
                 assert not value['userEnteredValue'].get('formulaValue')
                 row[i] = copy.deepcopy(value)
                 row[i]['formattedValue'] = str(next(iter(value['userEnteredValue'].values())))
@@ -85,6 +100,8 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
                 assert c.post(f"/api/games/{game['id']}/finish", headers=h).status_code == 503
             assert c.post(f"/api/games/{game['id']}/finish", headers=h).status_code == 200
             assert g.table[1][5]['formattedValue'] == ('進行中' if n == 0 else '已完成所有指定題目')
+        assert all(not cell.get('note') for row in g.table for cell in row)
+        assert g.hidden_props['hidden'] is True
         assert g.table[1][10]['userEnteredValue'] == {'numberValue': 34}
         assert g.table[2][8]['formattedValue'] == g.table[2][9]['formattedValue'] == ''
         visible = ' '.join(cell['formattedValue'] for cell in g.table[1][5:11])
@@ -93,6 +110,12 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
         assert g.table[1][6]['formattedValue'] == '學生：牠是不是動物？\n主持人：是'
         assert g.table[1][8]['formattedValue'] == g.table[1][6]['formattedValue']
         assert c.post('/api/logout', headers=h).status_code == 200
+    # Simulate the previous release's populated notes, then verify migration and restore.
+    for n, student in [(1, '1:01'), (2, '1:02')]:
+        stored = next(row for row in g.hidden[1:] if row[0]['formattedValue'] == student)
+        for col, encoded in [(5, stored[1]), (6, stored[2])]:
+            g.table[n][col]['note'] = cell(json.loads(encoded['formattedValue']), student)['note']
+    g.hidden = g.hidden_props = None
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         h = login(c)
         assert c.get('/api/games/'+ids[0], headers=h).json()['state'] == 'finished'
@@ -133,3 +156,18 @@ def test_existing_non_system_notes_are_preserved(settings, ai, tmp_path):
         with TestClient(create_app(settings, ai=ai, google=g)):
             pass
     assert g.table[1][5]['note'] == 'teacher note'
+
+
+def test_migrate_notes_atomically_and_reorder_roster(settings, ai, tmp_path):
+    g = prepare(settings, tmp_path)
+    # Existing empty notes written by the previous release migrate without changing identity.
+    for n, student in [(1, '1:01'), (2, '1:02')]:
+        g.table[n].extend([cell({}, student), cell({}, student, True)])
+    g.write_student_records([], True)
+    assert all(not c.get('note') for row in g.table for c in row)
+    before = copy.deepcopy(g.hidden)
+    g.table[1], g.table[2] = g.table[2], g.table[1]
+    g.write_student_records([], True)
+    assert g.hidden == before
+    rows = g.recovery_rows()
+    assert [r[:2] for r in rows[1:]] == [['1','02'], ['1','01']]

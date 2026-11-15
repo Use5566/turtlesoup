@@ -34,12 +34,12 @@ async function api(path, options = {}) {
   } finally { clearTimeout(timer); }
 }
 async function setup() {
-  for (let i = 1; i <= 99; i++) $("seat").add(new Option(String(i).padStart(2, "0"), String(i)));
+  for (let i = 1; i <= 29; i++) $("seat").add(new Option(String(i).padStart(2, "0"), String(i)));
   try {
     const data = await api("/api/config"); mode = data.mode;
     $("mode").hidden = mode !== "mock";
     $("classroom").replaceChildren(new Option("選擇班級", ""));
-    data.classes.forEach(value => $("classroom").add(new Option(value + " 班", value)));
+    for (let i = 1; i <= 7; i++) $("classroom").add(new Option(i + " 班", String(i)));
   } catch (e) { $("classroom").replaceChildren(new Option("暫時無法載入", "")); $("login-error").textContent = e.message + " 請重新整理。"; }
 }
 $("login-form").addEventListener("submit", async event => {

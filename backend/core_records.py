@@ -1,7 +1,7 @@
-"""Readable F–K projection. Recovery data lives only in F/G cell notes."""
+"""Readable F–K projection. Recovery data lives in a separate hidden sheet."""
 import hashlib
 import json
-from .readable_records import decode, cell, STATUS
+from .readable_records import decode, STATUS
 from .roster import normalize
 
 HEADERS = ['班級', '座號', '密碼', '謎面1', '謎面2', '作答狀況',
@@ -35,7 +35,10 @@ def read_core(google):
     return props, index
 
 
-def histories(student, cells):
+def histories(student, cells, stored=None):
+    if stored is not None and student in stored:
+        # Once migrated, hidden storage is authoritative; notes are no longer written.
+        return json.loads(json.dumps(stored[student][1]))
     result = []
     for col in (5, 6):
         note = cells[col].get('note', '')
@@ -83,7 +86,7 @@ def projection(student, cells, turns, games):
     known = sum(x for x in counts if type(x) is int and x >= 0)
     total = known if all(type(x) is int and x >= 0 for x in counts) else f'資料不完整（已知 {known}）'
     visible = [status, *texts, total]
-    output = [cell(turns, student), cell(games, student, True), {}, {}, {}, {}]
+    output = [{} for _ in range(6)]
     for out, value in zip(output, visible):
         if len(str(value).encode('utf-16-le')) // 2 > 49000:
             raise ValueError('互動紀錄超出容量，請封存')
@@ -96,23 +99,34 @@ def write_core(google, incoming, initialize=False):
     from .sheets import TURN_TAB, TURN_HEADERS, GAME_HEADERS
     with google.lock:
         props, index = read_core(google)
-        pending = {s: histories(s, c) for s, (_, c) in index.items()} if initialize else {}
+        storage, stored, setup = read_storage(google)
+        pending = {s: histories(s, c, stored) for s, (_, c) in index.items()} if initialize else {}
         for kind, _, values in incoming:
             student = normalize(values[2], values[3]) if kind == TURN_TAB else normalize(values[1], values[2])
             if student not in index:
                 raise ValueError('學生已不在正式名冊，保留紀錄待處理')
             if student not in pending:
-                pending[student] = histories(student, index[student][1])
+                pending[student] = histories(student, index[student][1], stored)
             col = 0 if kind == TURN_TAB else 1
             headers = TURN_HEADERS if col == 0 else GAME_HEADERS
             record = dict(zip(headers, values))
             if col == 1 and len(values) > len(headers):
                 record['_restore'] = values[-1]
             pending[student][col][str(values[0])] = record
-        requests = []
+        requests = list(setup)
+        next_row = max((r for r, _ in stored.values()), default=1) + 1
         for student, (turns, games) in pending.items():
             number, cells = index[student]
             output = projection(student, cells, turns, games)
+            encoded = [student, pack(turns), pack(games)]
+            if student not in stored or stored[student][1] != [turns, games]:
+                row = stored[student][0] if student in stored else next_row
+                if student not in stored:
+                    next_row += 1
+                if row > storage["gridProperties"]["rowCount"]:
+                    raise ValueError("恢復資料超出容量，請封存")
+                requests.append({"updateCells": {"start": {"sheetId": storage["sheetId"], "rowIndex": row-1, "columnIndex": 0},
+                    "rows": [{"values": [{"userEnteredValue": {"stringValue": v}} for v in encoded]}], "fields": "userEnteredValue"}})
             # Do not write unchanged rows at every startup or autosave.
             if all(output[i]['userEnteredValue'] == cells[i+5].get('userEnteredValue') and
                    output[i]['note'] == cells[i+5].get('note', '') for i in range(6)):
@@ -122,6 +136,8 @@ def write_core(google, incoming, initialize=False):
         if requests:
             # Re-read before writing; no atomic compare-and-swap exists in Sheets.
             _, current = read_core(google)
+            if read_storage(google)[1] != stored:
+                raise ValueError("恢復資料已變動，稍後重試")
             if any(current.get(student) != index[student] for student in pending):
                 raise ValueError('名冊已變動，稍後重試')
             google.request('POST', ':batchUpdate', json={'requests': requests})
@@ -129,9 +145,45 @@ def write_core(google, incoming, initialize=False):
 
 def recovery_core(google):
     _, index = read_core(google)
+    _, stored, _ = read_storage(google)
     # Feed the existing versioned snapshot restorer without exposing metadata.
     result = [['班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要']]
     for student, (_, cells) in index.items():
-        turns, games = histories(student, cells)
+        turns, games = histories(student, cells, stored)
         result.append([*student.split(':'), '', '', '', json.dumps(turns), json.dumps(games)])
     return result
+
+
+STORAGE_TITLE = '系統恢復資料（請勿編輯）'
+STORAGE_HEADERS = ['student', 'turns_v1', 'games_v1']
+
+
+def pack(records):
+    value = json.dumps(records, ensure_ascii=False, separators=(',', ':'))
+    if len(value.encode('utf-16-le')) // 2 > 49000:
+        raise ValueError('恢復資料接近容量上限，請封存')
+    return value
+
+
+def read_storage(google):
+    props = [s['properties'] for s in google.metadata()['sheets']]
+    storage = next((p for p in props if p['title'] == STORAGE_TITLE), None)
+    if storage is None:
+        storage = {'sheetId': max(p['sheetId'] for p in props) + 1,
+                   'title': STORAGE_TITLE, 'hidden': True,
+                   'gridProperties': {'rowCount': 2000, 'columnCount': 3}}
+        return storage, {}, [{'addSheet': {'properties': storage}}, {'updateCells': {
+            'start': {'sheetId': storage['sheetId'], 'rowIndex': 0, 'columnIndex': 0},
+            'rows': [{'values': [{'userEnteredValue': {'stringValue': h}} for h in STORAGE_HEADERS]}],
+            'fields': 'userEnteredValue'}}]
+    rows = google.values(STORAGE_TITLE, 'A1:C' + str(min(storage['gridProperties']['rowCount'], 2000)))
+    if not rows or rows[0] != STORAGE_HEADERS:
+        raise ValueError('恢復分頁格式不符，保留原資料')
+    stored = {}
+    for n, row in enumerate(rows[1:], 2):
+        if not any(row):
+            continue
+        if len(row) != 3 or row[0] in stored:
+            raise ValueError('恢復資料重複或格式不符')
+        stored[row[0]] = (n, [decode(row[1], '', row[0]), decode(row[2], '', row[0])])
+    return storage, stored, []

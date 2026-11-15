@@ -7,12 +7,12 @@ function harness() {
   const elements = new Map(), intervals = [], calls = [];
   function element(id) {
     if (!elements.has(id)) elements.set(id, {value: '', textContent: '', dataset: {},
-      add() {}, replaceChildren() {}, addEventListener() {}, append() {}});
+      options: [], add(option) { this.options.push(option); }, replaceChildren(...items) { this.options = items; }, addEventListener() {}, append() {}});
     return elements.get(id);
   }
   const context = vm.createContext({document: {getElementById: element},
     window: {TURTLESOUP_CONFIG: {apiBase: 'https://test.invalid'}, addEventListener() {}},
-    location: {hostname: 'localhost'}, Option: function() {}, AbortController,
+    location: {hostname: 'localhost'}, Option: function(text, value) {this.text = text; this.value = value;}, AbortController,
     setTimeout, clearTimeout, setInterval: (fn, delay) => intervals.push({fn, delay}),
     fetch: async (url, options) => {
       calls.push({url, options});
@@ -42,4 +42,12 @@ test('failed autosave never claims cloud success and keeps the draft', async () 
   await assert.rejects(vm.runInContext('saveDraft()', h.context));
   assert.equal(h.elements.get('question').value, '尚未送出的草稿');
   assert.ok(!h.elements.get('sync-status')?.textContent.includes('已儲存'));
+});
+
+
+test('login offers exactly classes 1-7 and seats 1-29', async () => {
+  const h = harness();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(h.elements.get('classroom').options.slice(1).map(o => o.value), Array.from({length:7},(_,i)=>String(i+1)));
+  assert.deepEqual(h.elements.get('seat').options.map(o => o.value), Array.from({length:29},(_,i)=>String(i+1)));
 });

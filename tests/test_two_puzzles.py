@@ -8,7 +8,7 @@ from backend.roster import Roster
 
 def test_one_digit_class_and_per_student_two_puzzles(settings, ai, tmp_path):
     for name in ('臺灣藍鵲', '南亞夜鷹'):
-        (tmp_path / (name + '.txt')).write_text((ROOT / (name + '.txt')).read_text(encoding='utf-8'), encoding='utf-8')
+        (tmp_path / (name + '.txt')).write_text('【謎面】測試用故事。\n【湯底】\n', encoding='utf-8')
     settings.puzzles_path = str(tmp_path / '臺灣藍鵲.txt')
     roster = Roster(settings)
     roster.read_rows = lambda: [['班級', '座號', '密碼', '謎面1', '謎面2'],
