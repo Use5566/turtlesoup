@@ -94,6 +94,8 @@ class Service:
             path = self.settings.path(self.settings.puzzles_path)
             assignment = assignment_override if assignment_override is not None else (self.roster.assignment(student) if student is not None else None)
             if isinstance(assignment, list):
+                if self.settings.first_puzzle_only:
+                    assignment = assignment[:1]
                 return [p for item in assignment for p in self.puzzles(student, item)]
             if assignment is not None:
                 answer, surface = assignment
@@ -109,7 +111,7 @@ class Service:
                 surface = assignment[1] if assignment is not None else text.strip()
                 data = [{'id': 'txt-' + hashlib.sha256(path.name.encode()).hexdigest()[:12],
                          'version': '1', 'title': '海龜湯挑戰' if assignment is not None else path.stem, 'surface': surface,
-                         'solution': text.strip(), 'facts': [], 'max_turns': 30}]
+                         'solution': text.strip(), 'facts': [], 'max_turns': 20}]
                 data[0]['pending_solution'] = '【湯底】' in text and not text.split('【湯底】', 1)[1].strip()
             else:
                 data = json.loads(text)
@@ -120,7 +122,7 @@ class Service:
                 for key in ('id', 'version', 'title', 'surface', 'solution'):
                     if not isinstance(p.get(key), str) or not p[key].strip():
                         raise ValueError()
-                if p['id'] in ids or not 1 <= p.get('max_turns', 30) <= 100:
+                if p['id'] in ids or not 1 <= min(p.get('max_turns', 20), 20) <= 100:
                     raise ValueError()
                 ids.add(p['id'])
                 # Bind progress to the exact private story, even if author forgets to bump version.
@@ -166,7 +168,7 @@ class Service:
             turns = list(db.scalars(select(Turn).where(Turn.game_id == g.id).order_by(Turn.sequence)))
             return {'id': g.uid, 'activity': g.activity, 'title': p['title'], 'surface': p['surface'],
                 'draft': g.draft, 'draft_kind': g.draft_kind,
-                'state': g.state, 'max_turns': p.get('max_turns', 30), 'turns': [self.turn_json(t) for t in turns],
+                'state': g.state, 'max_turns': min(p.get('max_turns', 20), 20), 'turns': [self.turn_json(t) for t in turns],
                 'sync': 'synced' if g.synced_revision == g.revision else ('pending' if self.settings.sheets_sync_enabled else 'local'),
                 'mock_examples': p.get('mock_examples', []) if self.settings.ai_mode == 'mock' else []}
 
@@ -191,7 +193,7 @@ class Service:
             puzzle = json.loads(g.puzzle)
             if puzzle.get('pending_solution'):
                 raise Problem(503, '老師尚未提供這題的正式湯底，暫時無法提問。')
-            if len(previous) >= puzzle.get('max_turns', 30):
+            if len(previous) >= min(puzzle.get('max_turns', 20), 20):
                 raise Problem(409, '已達本場次提問上限。')
             history = [{'question': t.question, 'answer': t.answer} for t in previous if t.answer]
         self.limit('ask:' + student, 20, 300)
@@ -206,7 +208,7 @@ class Service:
             if g.state != 'active' or db.scalar(select(Turn.id).where(Turn.game_id == g.id, Turn.status == 'processing')):
                 raise Problem(409, '場次狀態已變更，請重新整理。')
             count = db.scalar(select(func.count()).select_from(Turn).where(Turn.game_id == g.id))
-            if count >= puzzle.get('max_turns', 30):
+            if count >= min(puzzle.get('max_turns', 20), 20):
                 raise Problem(409, '已達本場次提問上限。')
             turn = Turn(request_id=request_id, game_id=g.id, sequence=count + 1, question=question,
                 question_type=kind, model='local-mock' if self.settings.ai_mode == 'mock' else self.settings.gemini_model)

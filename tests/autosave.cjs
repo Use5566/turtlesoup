@@ -51,3 +51,20 @@ test('login offers exactly classes 1-7 and seats 1-29', async () => {
   assert.deepEqual(h.elements.get('classroom').options.slice(1).map(o => o.value), Array.from({length:7},(_,i)=>String(i+1)));
   assert.deepEqual(h.elements.get('seat').options.map(o => o.value), Array.from({length:29},(_,i)=>String(i+1)));
 });
+
+
+test('single available puzzle opens directly without a selection card', async () => {
+  const h = harness();
+  h.context.fetch = async (url, options) => {
+    h.calls.push({url, options});
+    return {ok:true, json:async () => url.endsWith('/api/activities') ?
+      {activities:[{id:'first',title:'臺灣藍鵲'}]} : {id:'saved',draft:'保留草稿'}};
+  };
+  vm.runInContext('renderGame = () => {}', h.context);
+  await vm.runInContext('activities()', h.context);
+  assert.equal(h.elements.get('game-view').hidden, false);
+  assert.equal(h.elements.get('activities-view').hidden, true);
+  assert.equal(h.elements.get('back').hidden, true);
+  assert.equal(h.elements.get('question').value, '保留草稿');
+  assert.equal(JSON.parse(h.calls.find(c => c.url.endsWith('/api/games')).options.body).activity, 'first');
+});

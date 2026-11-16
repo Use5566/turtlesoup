@@ -207,3 +207,36 @@ def test_startup_failure_releases_connections(settings, ai, tmp_path):
         with TestClient(app):
             pass
     assert closed == ['google', 'database']
+
+
+def test_first_only_and_twenty_turn_limit_apply_to_old_games(settings, ai, tmp_path):
+    from backend.models import Game, Turn
+    from sqlalchemy import select
+    g = prepare(settings, tmp_path)
+    app = create_app(settings, ai=ai, google=g)
+    with TestClient(app) as c:
+        h = login(c)
+        activities = c.get('/api/activities', headers=h).json()['activities']
+        first = c.post('/api/games', headers=h, json={'activity':activities[0]['id']}).json()
+        second = c.post('/api/games', headers=h, json={'activity':activities[1]['id']}).json()
+        with app.state.service.store.transaction() as db:
+            old = db.scalar(select(Game).where(Game.uid == first['id']))
+            puzzle = json.loads(old.puzzle); puzzle['max_turns'] = 30; old.puzzle = json.dumps(puzzle)
+            for n in range(19):
+                db.add(Turn(request_id=str(uuid.uuid4()), game_id=old.id, sequence=n+1,
+                    question='既有提問', question_type='is', model='mock', status='answered', answer='是', usage='{"totalTokenCount":1}'))
+        settings.first_puzzle_only = True
+        assert len(c.get('/api/activities',headers=h).json()['activities']) == 1
+        assert c.post('/api/games',headers=h,json={'activity':activities[1]['id']}).status_code == 404
+        assert c.post('/api/games/'+second['id']+'/questions',headers=h,json={'request_id':str(uuid.uuid4()),'question':'是不是？'}).status_code == 409
+        assert c.get('/api/games/'+first['id'],headers=h).json()['max_turns'] == 20
+        assert c.post('/api/games/'+first['id']+'/questions',headers=h,json={'request_id':str(uuid.uuid4()),'question':'是不是？'}).status_code == 200
+        assert c.post('/api/games/'+first['id']+'/questions',headers=h,json={'request_id':str(uuid.uuid4()),'question':'是不是？'}).status_code == 409
+        assert ai.calls == 1
+        assert c.post('/api/games/'+first['id']+'/finish',headers=h).status_code == 200
+        assert g.table[1][5]['formattedValue'] == '已完成所有指定題目'
+    with TestClient(create_app(settings, ai=ai, google=g)) as c:
+        h = login(c)
+        restored = c.post('/api/games',headers=h,json={'activity':activities[0]['id']}).json()
+        assert restored['id'] == first['id'] and len(restored['turns']) == 20
+        assert restored['state'] == 'finished' and restored['max_turns'] == 20

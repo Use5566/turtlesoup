@@ -68,6 +68,11 @@ async function activities() {
   try {
     const data = await api("/api/activities");
     if (epoch !== generation || !token) return;
+    $("back").hidden = data.activities.length === 1;
+    if (data.activities.length === 1) {
+      await enterActivity(data.activities[0], epoch);
+      return;
+    }
     if (!data.activities.length) $("activity-error").textContent = "目前沒有開放的活動，請等候老師。";
     for (const [i, item] of data.activities.entries()) {
       const button = document.createElement("button"); button.className = "activity-card";
@@ -78,17 +83,20 @@ async function activities() {
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          const result = await api("/api/games", { method: "POST", body: JSON.stringify({ activity: item.id }) });
-          if (epoch !== generation || !token) return;
-          game = result;
-          pending = null; $("question").value = game.draft || "";
-          updateCount(); $("game-error").textContent = "";
-          renderGame(); show("game");
+          await enterActivity(item, epoch);
         } catch (e) { $("activity-error").textContent = e.message; } finally { button.disabled = false; }
       });
       $("activity-list").append(button);
     }
   } catch(e) { $("activity-error").textContent = e.message; }
+}
+async function enterActivity(item, epoch) {
+  const result = await api("/api/games", { method: "POST", body: JSON.stringify({ activity: item.id }) });
+  if (epoch !== generation || !token) return;
+  game = result;
+  pending = null; $("question").value = game.draft || "";
+  updateCount(); $("game-error").textContent = "";
+  renderGame(); show("game");
 }
 function renderGame() {
   if (!game) return;

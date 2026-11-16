@@ -27,6 +27,7 @@ class Settings:
     sheet_storage: bool = False
     google_roster_sheet_id: str = ''
     core_records: bool = False
+    first_puzzle_only: bool = False
 
     @classmethod
     def from_env(cls):
@@ -42,7 +43,7 @@ class Settings:
                 sheets_sync_enabled=True, puzzles_path='臺灣藍鵲.txt',
                 sheet_storage=True, sync_seconds=35,
                 google_sheet_id='17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw',
-                core_records=True,
+                core_records=True, first_puzzle_only=True,
                 allowed_origins='https://turtlesoup-ytac.onrender.com',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),

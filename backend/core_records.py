@@ -66,7 +66,7 @@ def activity_id(name):
     return 'txt-' + hashlib.sha256(filename.encode()).hexdigest()[:12]
 
 
-def projection(student, cells, turns, games):
+def projection(student, cells, turns, games, first_only=False):
     texts, states = [], []
     for col in (3, 4):
         name = cells[col].get('formattedValue', '').strip()
@@ -82,7 +82,8 @@ def projection(student, cells, turns, games):
             str(t.get('AI回答') or STATUS.get(t.get('處理狀態'), '尚無回覆')) for t in questions)
         latest = max(sessions, key=lambda g: (g.get('開始時間', ''), g.get('最後互動時間', '')), default=None)
         state = '尚未開始' if latest is None else ('已結束' if latest.get('場次狀態') == 'finished' else '進行中')
-        states.append(state)
+        if col == 3 or not first_only:
+            states.append(state)
         count = sum(int(g.get('提問總數', 0)) for g in sessions)
         texts.extend([transcript, f'提問 {count} 次｜{state}'])
     status = ('未分配題目' if not states else '已完成所有指定題目' if all(s == '已結束' for s in states)
@@ -123,7 +124,7 @@ def write_core(google, incoming, initialize=False):
         next_row = max((r for r, _ in stored.values()), default=1) + 1
         for student, (turns, games) in pending.items():
             number, cells = index[student]
-            output = projection(student, cells, turns, games)
+            output = projection(student, cells, turns, games, google.settings.first_puzzle_only)
             encoded = [student, pack(turns), pack(games)]
             if student not in stored or stored[student][1] != [turns, games]:
                 row = stored[student][0] if student in stored else next_row
