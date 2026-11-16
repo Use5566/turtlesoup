@@ -103,8 +103,8 @@ function renderGame() {
   $("story-title").textContent = game.title; $("story-surface").textContent = game.surface;
   $("sync-status").textContent = syncLabels[game.sync]; $("turn-count").textContent = "已提問 " + game.turns.length + " / " + game.max_turns + " 次";
   $("finished").hidden = game.state !== "finished";
+  $("finished").textContent = game.sync === "pending" ? "已達提問上限，紀錄尚未完成儲存，請保留頁面。" : "已達提問上限，紀錄已保存。你可以繼續瀏覽問答紀錄。";
   $("question-form").hidden = game.state === "finished";
-  $("finish").disabled = busy || !!pending || game.state === "finished" || game.turns.some(t => t.status === "processing");
   $("send").disabled = busy || !!pending || game.turns.length >= game.max_turns || game.turns.some(t => t.status === "processing");
   $("question").disabled = busy || !!pending;
   $("retry").hidden = !pending; $("retry").disabled = busy;
@@ -116,7 +116,7 @@ function renderGame() {
     $("mock-examples").append(button);
   }
   const container = $("messages"), oldScroll = container.scrollTop, nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
-  if (game.turns.length >= game.max_turns && game.state === "active") $("game-error").textContent = "已達提問上限，可以結束本次探索。";
+  if (game.turns.length >= game.max_turns && game.state === "active") $("game-error").textContent = "已達提問上限，紀錄會自動保存。";
   const messageSignature = game.id + JSON.stringify(game.turns.map(t => [t.request_id, t.status, t.answer]));
   if (container.dataset.signature === messageSignature) return;
   container.dataset.signature = messageSignature;
@@ -139,7 +139,7 @@ function renderGame() {
     reply.append(icon, text); article.append(meta, question, reply); container.append(article);
   }
   container.scrollTop = nearBottom || busy ? container.scrollHeight : oldScroll;
-  if (game.turns.length >= game.max_turns && game.state === "active") $("game-error").textContent = "已達提問上限，可以結束本次探索。";
+  if (game.turns.length >= game.max_turns && game.state === "active") $("game-error").textContent = "已達提問上限，紀錄會自動保存。";
 }
 function updateCount() { $("char-count").textContent = Array.from($("question").value).length + " / 300"; }
 $("question").addEventListener("input", updateCount);
@@ -170,15 +170,6 @@ $("back").addEventListener("click", async () => {
   if (busy || pending) { $("game-error").textContent = "請先確認目前提問的結果。"; return; }
   try { await saveDraft(); game = null; activities(); }
   catch(e) { $("game-error").textContent = e.message; }
-});
-$("finish").addEventListener("click", () => $("finish-dialog").showModal());
-$("cancel-finish").addEventListener("click", () => $("finish-dialog").close());
-$("confirm-finish").addEventListener("click", async () => {
-  $("confirm-finish").disabled = true;
-  const epoch = generation;
-  try { const result = await api("/api/games/" + game.id + "/finish", { method: "POST" }); if (epoch === generation && token) { game = result; renderGame(); } }
-  catch(e) { $("game-error").textContent = e.message; }
-  finally { $("finish-dialog").close(); $("confirm-finish").disabled = false; }
 });
 let polling = false;
 setInterval(async () => {

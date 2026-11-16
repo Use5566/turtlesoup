@@ -103,9 +103,9 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
             assert c.post(f"/api/games/{game['id']}/questions", headers=h, json=payload).status_code == 200
             if n == 0:
                 g.fail_after = True
-                assert c.post(f"/api/games/{game['id']}/finish", headers=h).status_code == 503
-            assert c.post(f"/api/games/{game['id']}/finish", headers=h).status_code == 200
-            assert g.table[1][5]['formattedValue'] == ('進行中' if n == 0 else '已完成所有指定題目')
+                assert c.post(f"/api/games/{game['id']}/save", headers=h, json={"question":"草稿"}).status_code == 503
+            assert c.post(f"/api/games/{game['id']}/save", headers=h, json={"question":"草稿"}).status_code == 200
+            assert g.table[1][5]['formattedValue'] == '進行中'
         assert all(not cell.get('note') for row in g.table for cell in row)
         assert g.hidden_props['hidden'] is True
         assert g.table[1][10]['userEnteredValue'] == {'numberValue': 34}
@@ -125,7 +125,7 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
     g._core_metadata = None
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         h = login(c)
-        assert c.get('/api/games/'+ids[0], headers=h).json()['state'] == 'finished'
+        assert c.get('/api/games/'+ids[0], headers=h).json()['state'] == 'active'
         assert c.get('/api/games/'+ids[1], headers=h).json()['turns'][0]['answer'] == '是'
     assert [row[:5] for row in g.table] == before
     assert ai.calls == 2
@@ -144,7 +144,7 @@ def test_single_puzzle_completion_and_draft_failure(settings, ai, tmp_path):
         assert c.post('/api/games/'+game['id']+'/save', headers=h,
                       json={'question': '草稿'}).status_code == 200
         assert c.post('/api/games/'+game['id']+'/finish', headers=h).status_code == 200
-        assert g.table[2][5]['formattedValue'] == '已完成所有指定題目'
+        assert g.table[2][5]['formattedValue'] == '進行中'
         assert g.table[2][10]['formattedValue'] == '0'
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         assert c.get('/api/games/'+game['id'], headers=login(c, '2', '23456')).json()['draft'] == '草稿'
@@ -240,3 +240,35 @@ def test_first_only_and_twenty_turn_limit_apply_to_old_games(settings, ai, tmp_p
         restored = c.post('/api/games',headers=h,json={'activity':activities[0]['id']}).json()
         assert restored['id'] == first['id'] and len(restored['turns']) == 20
         assert restored['state'] == 'finished' and restored['max_turns'] == 20
+
+
+@pytest.mark.parametrize('count', [2, 20, 24])
+def test_legacy_ended_sessions_resume_or_remain_read_only(settings, ai, tmp_path, count):
+    from backend.models import Game, Turn
+    from sqlalchemy import select
+    g = prepare(settings, tmp_path)
+    app = create_app(settings, ai=ai, google=g)
+    with TestClient(app) as c:
+        h = login(c)
+        activity = c.get('/api/activities', headers=h).json()['activities'][0]['id']
+        game = c.post('/api/games', headers=h, json={'activity':activity}).json()
+        with app.state.service.store.transaction() as db:
+            old = db.scalar(select(Game).where(Game.uid == game['id']))
+            old.state = 'finished'; old.revision += 1
+            for n in range(count):
+                db.add(Turn(request_id=str(uuid.uuid4()), game_id=old.id, sequence=n+1,
+                    question='保留的舊問題', question_type='is', status='answered', answer='是', model='mock', usage='{"totalTokenCount":1}'))
+        assert c.post('/api/logout',headers=h).status_code == 200
+    with TestClient(create_app(settings, ai=ai, google=g)) as c:
+        h = login(c)
+        restored = c.post('/api/games',headers=h,json={'activity':activity}).json()
+        assert restored['id'] == game['id'] and len(restored['turns']) == count
+        assert restored['state'] == ('active' if count < 20 else 'finished')
+        if count < 20:
+            assert c.post('/api/games/'+game['id']+'/save',headers=h,json={'question':'登出前草稿'}).status_code == 200
+            assert c.post('/api/logout',headers=h).status_code == 200
+            h = login(c)
+            assert c.get('/api/games/'+game['id'],headers=h).json()['draft'] == '登出前草稿'
+        result = c.post('/api/games/'+game['id']+'/questions',headers=h,json={'request_id':str(uuid.uuid4()),'question':'是不是？'})
+        assert result.status_code == (200 if count < 20 else 409)
+        assert ai.calls == (1 if count < 20 else 0)

@@ -7,7 +7,7 @@ function harness() {
   const elements = new Map(), intervals = [], calls = [];
   function element(id) {
     if (!elements.has(id)) elements.set(id, {value: '', textContent: '', dataset: {},
-      options: [], add(option) { this.options.push(option); }, replaceChildren(...items) { this.options = items; }, addEventListener() {}, append() {}});
+      options: [], add(option) { this.options.push(option); }, replaceChildren(...items) { this.options = items; }, listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, append() {}});
     return elements.get(id);
   }
   const context = vm.createContext({document: {getElementById: element},
@@ -67,4 +67,24 @@ test('single available puzzle opens directly without a selection card', async ()
   assert.equal(h.elements.get('back').hidden, true);
   assert.equal(h.elements.get('question').value, '保留草稿');
   assert.equal(JSON.parse(h.calls.find(c => c.url.endsWith('/api/games')).options.body).activity, 'first');
+});
+
+
+test('logout saves draft before ending login and has no manual finish button', async () => {
+  const h = harness();
+  await h.elements.get('logout').listeners.click();
+  const paths = h.calls.map(c => c.url);
+  assert.ok(paths.findIndex(p => p.endsWith('/save')) < paths.findIndex(p => p.endsWith('/api/logout')));
+  assert.equal(vm.runInContext('token', h.context), '');
+  assert.equal(h.elements.get('login-view').hidden, false);
+  assert.ok(!fs.readFileSync('web/index.html','utf8').includes('id="finish"'));
+});
+
+test('failed final save keeps login and draft available for retry', async () => {
+  const h = harness();
+  h.context.fetch = async (url, options) => { h.calls.push({url,options}); throw new TypeError('offline'); };
+  await h.elements.get('logout').listeners.click();
+  assert.ok(!h.calls.some(c => c.url.endsWith('/api/logout')));
+  assert.equal(vm.runInContext('token', h.context), 'test');
+  assert.equal(h.elements.get('question').value, '尚未送出的草稿');
 });

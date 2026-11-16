@@ -31,5 +31,5 @@ def test_production_same_origin_frontend_and_complete_flow(settings, ai, tmp_pat
         assert c.post('/api/logout', headers=h).status_code == 200
         h = login(c)
         assert c.get(f"/api/games/{game['id']}", headers=h).json()['draft'] == '草稿'
-        assert c.post(f"/api/games/{game['id']}/finish", headers=h).json()['state'] == 'finished'
+        assert c.post(f"/api/games/{game['id']}/finish", headers=h).json()['state'] == 'active'
         assert table[2][5] and table[2][6]

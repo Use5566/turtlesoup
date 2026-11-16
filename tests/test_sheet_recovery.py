@@ -44,10 +44,10 @@ def test_restart_recovers_questions_draft_and_finish(settings, ai, tmp_path):
         assert c.post(f"/api/games/{g['id']}/finish", headers=h).json()['sync'] == 'synced'
     with TestClient(create_app(settings, ai=ai, google=google)) as c:
         h = login(c)
-        assert c.get(f"/api/games/{g['id']}", headers=h).json()['state'] == 'finished'
+        assert c.get(f"/api/games/{g['id']}", headers=h).json()['state'] == 'active'
     assert '12345' not in table[2][5] + table[2][6]
     assert '學生：' in table[2][5] and '主持人：是' in table[2][5]
-    assert '已結束' in table[2][6]
+    assert '進行中' in table[2][6]
     for cell in table[2][5:7]:
         assert '_restore' not in cell and 'schema' not in cell and g['id'] not in cell
         assert '測試秘密資料' not in cell

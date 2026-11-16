@@ -43,6 +43,17 @@ class Service:
                 g = db.get(Game, turn.game_id)
                 g.revision += 1
                 g.updated = utcnow()
+            for game in db.scalars(select(Game)):
+                self.refresh_completion(db, game)
+
+    def refresh_completion(self, db, game):
+        count = db.scalar(select(func.count()).select_from(Turn).where(Turn.game_id == game.id))
+        processing = db.scalar(select(Turn.id).where(Turn.game_id == game.id, Turn.status == 'processing'))
+        cap = min(json.loads(game.puzzle).get('max_turns', 20), 20)
+        state = 'finished' if count >= cap and not processing else 'active'
+        if game.state != state:
+            game.state, game.updated = state, utcnow()
+            game.revision += 1
 
     def limit(self, key, cap, window):
         with self.lock, self.store.transaction() as db:
@@ -146,6 +157,7 @@ class Service:
                     puzzle=json.dumps(puzzle, ensure_ascii=False))
                 db.add(game)
                 db.flush()
+            self.refresh_completion(db, game)
             uid = game.uid
         return self.game(student, uid)
 
@@ -225,7 +237,9 @@ class Service:
         except Exception:
             with self.store.transaction() as db:
                 db.get(Turn, tid).status = 'interrupted'
-                db.get(Game, db.get(Turn, tid).game_id).revision += 1
+                failed_game = db.get(Game, db.get(Turn, tid).game_id)
+                failed_game.revision += 1
+                self.refresh_completion(db, failed_game)
             raise
         try:
             result = self.ai.judge(puzzle, question, kind, history)
@@ -240,15 +254,14 @@ class Service:
             turn.status, turn.answer, turn.usage = status, answer, json.dumps(usage)
             g = db.get(Game, turn.game_id)
             g.updated, g.revision = utcnow(), g.revision + 1
+            self.refresh_completion(db, g)
             return self.turn_json(turn)
 
     def finish(self, student, uid):
+        # Compatibility for previously loaded pages: save, never lock an unfinished game.
         with self.lock, self.store.transaction() as db:
             g = self.owned(db, student, uid)
-            if db.scalar(select(Turn.id).where(Turn.game_id == g.id, Turn.status == 'processing')):
-                raise Problem(409, '請等目前問題處理完成。')
-            if g.state != 'finished':
-                g.state, g.updated, g.revision = 'finished', utcnow(), g.revision + 1
+            self.refresh_completion(db, g)
         return self.game(student, uid)
 
     def save_draft(self, student, uid, text, kind):

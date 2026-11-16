@@ -74,7 +74,7 @@ def test_full_flow_to_fg_retry_and_finish(client, settings):
     # Identity lookup follows rows moved between sync cycles.
     table[1], table[2] = table[2], table[1]
     sync.once()
-    assert json.loads(table[1][6])[gid]['場次狀態'] == 'finished'
+    assert json.loads(table[1][6])[gid]['場次狀態'] == 'active'
     assert client.get(f'/api/games/{gid}', headers=h).json()['sync'] == 'synced'
     assert sorted(r[:5] for r in table) == sorted(before)
     assert table[2][5:] == ['', '']

@@ -103,11 +103,11 @@ def test_concurrent_duplicate_never_calls_twice(client, ai):
     assert ai.calls == 1
 
 
-def test_finish_locks_and_resume_keeps_finished(client):
+def test_legacy_finish_saves_without_locking(client):
     h = login(client); gid = start(client, h)
     assert ask(client, h, gid).status_code == 200
-    assert client.post(f'/api/games/{gid}/finish', headers=h).json()['state'] == 'finished'
-    assert ask(client, h, gid).status_code == 409
+    assert client.post(f'/api/games/{gid}/finish', headers=h).json()['state'] == 'active'
+    assert ask(client, h, gid).status_code == 200
     assert start(client, h) == gid
 
 
