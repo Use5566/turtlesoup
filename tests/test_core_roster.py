@@ -28,6 +28,7 @@ def test_four_column_roster_and_separate_log_creation(settings, ai, tmp_path):
         assert game['surface'] == '一件奇怪的事。'
         assert '秘密真相' not in str(game)
         assert ask(c, h, game['id']).status_code == 200
+        c.app.state.syncer.once()
         assert table[2][:3] == ['999', '01', '']
         assert '主持人：是' in table[2][5]
         assert len(core[0]) == 4 and len(core[1]) == 4

@@ -27,9 +27,10 @@ def test_production_same_origin_frontend_and_complete_flow(settings, ai, tmp_pat
         game = c.post('/api/games', headers=h, json={'activity': activity}).json()
         assert ask(c, h, game['id']).json()['answer'] == '是'
         assert c.post(f"/api/games/{game['id']}/save", headers=h,
-                      json={'question': '草稿', 'question_type': 'is'}).json()['sync'] == 'synced'
+                      json={'question': '草稿', 'question_type': 'is'}).json()['sync'] == 'pending'
         assert c.post('/api/logout', headers=h).status_code == 200
         h = login(c)
         assert c.get(f"/api/games/{game['id']}", headers=h).json()['draft'] == '草稿'
         assert c.post(f"/api/games/{game['id']}/finish", headers=h).json()['state'] == 'active'
+        c.app.state.syncer.once()
         assert table[2][5] and table[2][6]

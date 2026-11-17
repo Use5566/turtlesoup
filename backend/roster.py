@@ -24,6 +24,7 @@ class Roster:
         self.lock = threading.RLock()
         self.pepper = secrets.token_bytes(32)
         self.cache, self.loaded = {}, 0
+        self.retry_after = 0
         self.assignments = None
 
     def digest(self, student, password):
@@ -37,7 +38,12 @@ class Roster:
 
     def refresh(self):
         with self.lock:
-            if time.monotonic() - self.loaded < 30:
+            now = time.monotonic()
+            if now < self.retry_after:
+                # Fail closed: cached permissions may have been revoked. Avoid
+                # every student's poll immediately retrying a failed Google read.
+                raise Unavailable('目前無法核對名冊，請稍後再試或通知老師。')
+            if now - self.loaded < 30:
                 return
             try:
                 rows = self.read_rows()
@@ -67,7 +73,9 @@ class Roster:
                             assignments[student] = (str(row[i]).strip() if len(row) > i else '', None)
                 self.cache, self.loaded = parsed, time.monotonic()
                 self.assignments = assignments
+                self.retry_after = 0
             except Exception:
+                self.retry_after = time.monotonic() + 30
                 raise Unavailable('目前無法核對名冊，請稍後再試或通知老師。') from None
 
     def verify(self, student, password):

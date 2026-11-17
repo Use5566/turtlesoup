@@ -31,7 +31,6 @@ class Service:
         self.settings, self.store, self.roster, self.ai = settings, store, roster, ai
         # One process/worker, serialized state changes; remote API calls happen outside this lock.
         self.lock = threading.RLock()
-        self.checkpoint = lambda: None
 
     def recover(self):
         with self.store.transaction() as db:
@@ -230,17 +229,8 @@ class Service:
             g.revision += 1
             g.updated = utcnow()
             g.draft = ''
-        # Persist the request before calling a paid provider. A restart can then
-        # mark it interrupted rather than silently submitting it a second time.
-        try:
-            self.checkpoint()
-        except Exception:
-            with self.store.transaction() as db:
-                db.get(Turn, tid).status = 'interrupted'
-                failed_game = db.get(Game, db.get(Turn, tid).game_id)
-                failed_game.revision += 1
-                self.refresh_completion(db, failed_game)
-            raise
+        # The transaction above commits to SQLite before calling the provider.
+        # Sheets outages must not prevent or interrupt an otherwise valid question.
         try:
             result = self.ai.judge(puzzle, question, kind, history)
             answer, usage = display(result.decision, kind), result.usage

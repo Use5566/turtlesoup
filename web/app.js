@@ -2,7 +2,7 @@
 const $ = id => document.getElementById(id);
 const apiBase = (window.TURTLESOUP_CONFIG?.apiBase || "").replace(/\/$/, "");
 let token = "", game = null, mode = "mock", pending = null, busy = false, generation = 0;
-const syncLabels = { local: "已保存 · 試算表未啟用", pending: "尚未完成雲端儲存 · 請保留頁面", synced: "已儲存至試算表" };
+const syncLabels = { local: "已保存 · 試算表未啟用", pending: "已保存至伺服器 · 等待同步試算表", synced: "已儲存至試算表" };
 
 function show(view) {
   for (const name of ["login", "activities", "game"]) $(name + "-view").hidden = name !== view;
@@ -103,7 +103,7 @@ function renderGame() {
   $("story-title").textContent = game.title; $("story-surface").textContent = game.surface;
   $("sync-status").textContent = syncLabels[game.sync]; $("turn-count").textContent = "已提問 " + game.turns.length + " / " + game.max_turns + " 次";
   $("finished").hidden = game.state !== "finished";
-  $("finished").textContent = game.sync === "pending" ? "已達提問上限，紀錄尚未完成儲存，請保留頁面。" : "已達提問上限，紀錄已保存。你可以繼續瀏覽問答紀錄。";
+  $("finished").textContent = game.sync === "pending" ? "已達提問上限，紀錄已保存至伺服器，等待同步試算表。你可以繼續瀏覽或登出。" : "已達提問上限，紀錄已保存。你可以繼續瀏覽問答紀錄。";
   $("question-form").hidden = game.state === "finished";
   $("send").disabled = busy || !!pending || game.turns.length >= game.max_turns || game.turns.some(t => t.status === "processing");
   $("question").disabled = busy || !!pending;
@@ -145,7 +145,7 @@ function updateCount() { $("char-count").textContent = Array.from($("question").
 $("question").addEventListener("input", updateCount);
 $("question-form").addEventListener("submit", async event => {
   event.preventDefault(); if (busy || pending || !game || !$("question").value.trim()) return;
-  if (saving) { try { await saving; } catch { /* Submission retries the cloud save. */ } }
+  if (saving) { try { await saving; } catch { /* Submission persists the question independently. */ } }
   if (!game || !token || busy || pending) return;
   pending = { request_id: crypto.randomUUID(), question: $("question").value.trim() };
   await sendPending();

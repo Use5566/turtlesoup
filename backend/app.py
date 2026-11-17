@@ -16,6 +16,7 @@ from .ai import Gemini, MockAI, infer_kind
 from .service import Service, Problem
 from .sheets import GoogleSheets, Syncer
 from .sheet_state import restore
+from .sync_worker import SyncWorker
 
 
 class LoginInput(BaseModel):
@@ -53,54 +54,38 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     service = Service(settings, store, roster, ai)
     syncer = Syncer(store, google)
     stop = threading.Event()
-
-    def checkpoint():
-        if settings.sheet_storage:
-            try:
-                syncer.once()
-            except Exception:
-                raise Problem(503, '尚未儲存至試算表，請保留頁面並稍後重試。') from None
-
-    service.checkpoint = checkpoint
-
-    def sync_loop():
-        while not stop.wait(settings.sync_seconds):
-            try:
-                syncer.once()
-            except Exception:
-                # Do not log raw provider responses, credentials, or student questions.
-                print('試算表同步尚未成功，紀錄保留於資料庫，稍後重試。', flush=True)
+    scheduler = SyncWorker(syncer, settings.sync_seconds)
 
     @asynccontextmanager
     async def lifespan(app):
         worker = None
         try:
-            if settings.sheet_storage:
+            initialization_key = f'sheets:{settings.google_sheet_id}:{settings.google_roster_gid}'
+            if settings.sheet_storage and not store.initialized(initialization_key):
                 await asyncio.to_thread(google.write_student_records, [], True)
-                await asyncio.to_thread(restore, store, google)
+                await asyncio.to_thread(restore, store, google, initialization_key)
             service.recover()
-            await asyncio.to_thread(checkpoint)
             if settings.sheets_sync_enabled:
-                worker = threading.Thread(target=sync_loop, daemon=True)
+                scheduler.next_due = scheduler.clock() + settings.sync_seconds
+                worker = threading.Thread(target=scheduler.run, args=(stop,), daemon=True)
                 worker.start()
             yield
         finally:
             stop.set()
             if worker:
-                await asyncio.to_thread(worker.join)
-            if settings.sheet_storage:
-                try:
-                    await asyncio.to_thread(checkpoint)
-                except Problem:
-                    pass
-            for connection in [google] + ([roster_google] if roster_google is not google else []):
-                close = getattr(connection, 'close', None)
-                if close:
-                    close()
-            store.engine.dispose()
+                await asyncio.to_thread(worker.join, 5)
+            # Pending data is already committed. Do not hang shutdown on Google,
+            # or close connections underneath an in-flight daemon request.
+            if worker is None or not worker.is_alive():
+                for connection in [google] + ([roster_google] if roster_google is not google else []):
+                    close = getattr(connection, 'close', None)
+                    if close:
+                        close()
+                store.engine.dispose()
 
     app = FastAPI(title='turtlesoup', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.service, app.state.syncer = service, syncer
+    app.state.scheduler = scheduler
     app.add_middleware(CORSMiddleware,
         allow_origins=[s.strip() for s in settings.allowed_origins.split(',') if s.strip()],
         allow_credentials=False, allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])
@@ -149,7 +134,7 @@ def create_app(settings=None, roster=None, ai=None, google=None):
         return {'mode': settings.ai_mode, 'classes': roster.classes(),
                 'sheets_enabled': settings.sheets_sync_enabled,
                 'record_layout': 'core-fk-v2' if settings.core_records else 'legacy',
-                'build': '20261116-resume'}
+                'build': '20261117-batch-sync'}
 
     @app.post('/api/login')
     def login(body: LoginInput, request: Request):
@@ -163,7 +148,6 @@ def create_app(settings=None, roster=None, ai=None, google=None):
 
     @app.post('/api/logout')
     def logout(request: Request):
-        checkpoint()
         service.logout(token(request))
         return {'ok': True}
 
@@ -178,7 +162,6 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     @app.post('/api/games')
     def start(body: StartInput, sid=Depends(student)):
         result = service.start(sid, body.activity)
-        checkpoint()
         return service.game(sid, result['id'])
 
     @app.get('/api/games/{uid}')
@@ -188,19 +171,16 @@ def create_app(settings=None, roster=None, ai=None, google=None):
     @app.post('/api/games/{uid}/questions')
     def ask(uid: UUID, body: QuestionInput, sid=Depends(student)):
         result = service.ask(sid, str(uid), str(body.request_id), body.question, body.question_type or infer_kind(body.question))
-        checkpoint()
         return result
 
     @app.post('/api/games/{uid}/save')
     def save(uid: UUID, body: DraftInput, sid=Depends(student)):
         service.save_draft(sid, str(uid), body.question, body.question_type or infer_kind(body.question))
-        checkpoint()
         return service.game(sid, str(uid))
 
     @app.post('/api/games/{uid}/finish')
     def finish(uid: UUID, sid=Depends(student)):
         service.finish(sid, str(uid))
-        checkpoint()
         return service.game(sid, str(uid))
 
     # Register after API routes; expose only frontend assets, never repository data.

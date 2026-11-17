@@ -1,7 +1,8 @@
-"""Durable game snapshots in roster G; local SQL is only a runtime cache."""
+"""Import cloud snapshots once; durable local SQL owns subsequent pending work."""
 import json
 from datetime import datetime, timezone, timedelta
-from .models import Game, Turn
+from sqlalchemy import select
+from .models import Game, Turn, StorageState
 from .roster import normalize
 from .puzzle_files import resolve_puzzle
 
@@ -16,7 +17,7 @@ def snapshot(game, turns):
             'turns': [{k: getattr(t, k) for k in TURN_FIELDS} for t in turns]}
 
 
-def restore(store, google):
+def restore(store, google, initialization_key=None):
     rows = google.recovery_rows()
     if not rows or [str(v).strip() for v in rows[0]][:7] != [
             '班級', '座號', '密碼', '謎底', '謎面', '互動紀錄', '場次摘要']:
@@ -59,6 +60,12 @@ def restore(store, google):
                         record['資料版本'], '', 'is'])), 'turns': turns}
                 if data['schema'] != 1 or data['game']['student'] != student or data['game']['uid'] != uid:
                     raise ValueError('場次恢復資料與學生不符')
+                existing = db.scalar(select(Game).where(Game.uid == uid))
+                if existing:
+                    if existing.student != student:
+                        raise ValueError('本機場次身分不符')
+                    # A local pending answer can be newer than the cloud snapshot.
+                    continue
                 game = Game(**{k: data['game'][k] for k in GAME_FIELDS})
                 game.synced_revision = game.revision
                 db.add(game)
@@ -66,3 +73,5 @@ def restore(store, google):
                 for saved in data['turns']:
                     db.add(Turn(game_id=game.id, synced=1,
                                 **{k: saved[k] for k in TURN_FIELDS}))
+        if initialization_key:
+            db.merge(StorageState(key=initialization_key, value='1'))

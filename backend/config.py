@@ -28,6 +28,7 @@ class Settings:
     google_roster_sheet_id: str = ''
     core_records: bool = False
     first_puzzle_only: bool = False
+    require_persistent_disk: bool = False
 
     @classmethod
     def from_env(cls):
@@ -41,13 +42,13 @@ class Settings:
             settings = cls(
                 app_mode='production', ai_mode='gemini', roster_mode='google',
                 sheets_sync_enabled=True, puzzles_path='臺灣藍鵲.txt',
-                sheet_storage=True, sync_seconds=35,
+                sheet_storage=True, sync_seconds=3, require_persistent_disk=True,
                 google_sheet_id='17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw',
                 core_records=True, first_puzzle_only=True,
                 allowed_origins='https://turtlesoup-ytac.onrender.com',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),
-                database_url='sqlite://')
+                database_url='sqlite:////var/data/turtlesoup/turtlesoup.db')
             settings.validate()
             return settings
         values = {}
@@ -72,7 +73,7 @@ class Settings:
                 raise ValueError('正式模式必須啟用 Google 試算表儲存')
             if '*' in self.allowed_origins or any(not x.strip().startswith('https://') for x in self.allowed_origins.split(',')):
                 raise ValueError('正式模式必須指定 HTTPS 前台來源')
-        if self.session_seconds < 60 or self.sync_seconds < 5:
+        if self.session_seconds < 60 or self.sync_seconds < 3:
             raise ValueError('登入或同步間隔設定無效')
         if not 0 <= self.gemini_temperature <= 2 or not 128 <= self.gemini_max_output_tokens <= 4096:
             raise ValueError('Gemini 生成參數超出允許範圍')

@@ -103,8 +103,11 @@ def test_two_puzzles_visible_columns_token_retry_and_restore(settings, ai, tmp_p
             assert c.post(f"/api/games/{game['id']}/questions", headers=h, json=payload).status_code == 200
             if n == 0:
                 g.fail_after = True
-                assert c.post(f"/api/games/{game['id']}/save", headers=h, json={"question":"草稿"}).status_code == 503
+                assert c.post(f"/api/games/{game['id']}/save", headers=h, json={"question":"草稿"}).status_code == 200
+                with pytest.raises(OSError):
+                    c.app.state.syncer.once()
             assert c.post(f"/api/games/{game['id']}/save", headers=h, json={"question":"草稿"}).status_code == 200
+            c.app.state.syncer.once()
             assert g.table[1][5]['formattedValue'] == '進行中'
         assert all(not cell.get('note') for row in g.table for cell in row)
         assert g.hidden_props['hidden'] is True
@@ -139,11 +142,14 @@ def test_single_puzzle_completion_and_draft_failure(settings, ai, tmp_path):
         game = c.post('/api/games', headers=h, json={'activity': a['id']}).json()
         g.fail = True
         assert c.post('/api/games/'+game['id']+'/save', headers=h,
-                      json={'question': '草稿'}).status_code == 503
+                      json={'question': '草稿'}).status_code == 200
+        with pytest.raises(OSError):
+            c.app.state.syncer.once()
         g.fail = False
         assert c.post('/api/games/'+game['id']+'/save', headers=h,
                       json={'question': '草稿'}).status_code == 200
         assert c.post('/api/games/'+game['id']+'/finish', headers=h).status_code == 200
+        c.app.state.syncer.once()
         assert g.table[2][5]['formattedValue'] == '進行中'
         assert g.table[2][10]['formattedValue'] == '0'
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
@@ -188,6 +194,8 @@ def test_changed_draft_uses_two_combined_reads(settings, ai, tmp_path):
         game = c.post('/api/games', headers=h, json={'activity': a['id']}).json()
         before = g.reads
         assert c.post('/api/games/'+game['id']+'/save', headers=h, json={'question':'新草稿'}).status_code == 200
+        assert g.reads == before
+        c.app.state.syncer.once()
         assert g.reads - before == 2
 
 
@@ -234,6 +242,7 @@ def test_first_only_and_twenty_turn_limit_apply_to_old_games(settings, ai, tmp_p
         assert c.post('/api/games/'+first['id']+'/questions',headers=h,json={'request_id':str(uuid.uuid4()),'question':'是不是？'}).status_code == 409
         assert ai.calls == 1
         assert c.post('/api/games/'+first['id']+'/finish',headers=h).status_code == 200
+        app.state.syncer.once()
         assert g.table[1][5]['formattedValue'] == '已完成所有指定題目'
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         h = login(c)
@@ -259,6 +268,7 @@ def test_legacy_ended_sessions_resume_or_remain_read_only(settings, ai, tmp_path
                 db.add(Turn(request_id=str(uuid.uuid4()), game_id=old.id, sequence=n+1,
                     question='保留的舊問題', question_type='is', status='answered', answer='是', model='mock', usage='{"totalTokenCount":1}'))
         assert c.post('/api/logout',headers=h).status_code == 200
+        app.state.syncer.once()
     with TestClient(create_app(settings, ai=ai, google=g)) as c:
         h = login(c)
         restored = c.post('/api/games',headers=h,json={'activity':activity}).json()

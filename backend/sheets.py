@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from google.oauth2.service_account import Credentials
 from google.auth.transport.requests import AuthorizedSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from .models import Game, Turn
 from .roster import normalize
 from .sheet_state import snapshot
@@ -17,6 +17,12 @@ TURN_HEADERS = ['請求編號', '紀錄時間', '班級', '座號', '活動編�
                 '提問序號', '學生問題', '問句類型', 'AI回答', '處理狀態', '模型', '總tokens']
 GAME_HEADERS = ['場次編號', '班級', '座號', '活動編號', '題目版本', '開始時間', '最後互動時間',
                 '提問總數', '場次狀態', '累計tokens', '資料版本']
+
+
+class SheetsRequestError(RuntimeError):
+    def __init__(self, status_code):
+        self.status_code = status_code
+        super().__init__('Google Sheets 請求失敗：HTTP ' + str(status_code))
 
 
 def address(tab, cells):
@@ -42,7 +48,7 @@ class GoogleSheets:
                 self.session = AuthorizedSession(credentials)
             response = self.session.request(method, self.base + suffix, timeout=20, **kwargs)
             if not response.ok:
-                raise RuntimeError('Google Sheets 請求失敗：HTTP ' + str(response.status_code))
+                raise SheetsRequestError(response.status_code)
             return response.json()
 
     def close(self):
@@ -66,7 +72,9 @@ class GoogleSheets:
             raise ValueError('找不到指定名冊分頁')
         tab = matches[0]
         # Bounded classroom roster; never return this data to the browser.
-        return self.values(tab['title'], 'A1:' + 'Z' + str(min(tab['gridProperties']['rowCount'], 2000)))
+        # Login needs identities and assignments, never full chat transcripts.
+        end = 'E' if self.settings.core_records else 'Z'
+        return self.values(tab['title'], 'A1:' + end + str(min(tab['gridProperties']['rowCount'], 2000)))
 
     def init_logs(self):
         """Explicit CLI only. No startup mutations, no roster writes."""
@@ -246,8 +254,13 @@ class Syncer:
     def once(self):
         with self.lock:
             with self.store.transaction() as db:
-                turns = list(db.scalars(select(Turn).where(Turn.synced == 0, Turn.status != 'processing').order_by(Turn.id).limit(100)))
-                games = list(db.scalars(select(Game).where(Game.revision > Game.synced_revision).order_by(Game.id).limit(100)))
+                pending_games = select(Turn.game_id).where(Turn.synced == 0, Turn.status != 'processing')
+                games = list(db.scalars(select(Game).where(or_(
+                    Game.revision > Game.synced_revision, Game.id.in_(pending_games))).order_by(Game.id).limit(100)))
+                # Keep each game's ledger and recovery snapshot in the same batch.
+                # A classroom of 30 x 20 answers must not be truncated at 100 turns.
+                turns = list(db.scalars(select(Turn).where(Turn.game_id.in_([g.id for g in games]),
+                    Turn.synced == 0, Turn.status != 'processing').order_by(Turn.id)))
                 rows = []
                 for t in turns:
                     g = db.get(Game, t.game_id)

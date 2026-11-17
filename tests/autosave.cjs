@@ -88,3 +88,18 @@ test('failed final save keeps login and draft available for retry', async () => 
   assert.equal(vm.runInContext('token', h.context), 'test');
   assert.equal(h.elements.get('question').value, '尚未送出的草稿');
 });
+
+test('server-saved draft awaiting Sheets sync is shown accurately and allows logout', async () => {
+  const h = harness();
+  h.context.fetch = async (url, options) => {
+    h.calls.push({url, options});
+    return {ok: true, json: async () => ({sync: 'pending'})};
+  };
+  await vm.runInContext('saveDraft()', h.context);
+  assert.match(h.elements.get('sync-status').textContent, /已保存至伺服器/);
+  assert.match(h.elements.get('sync-status').textContent, /等待同步試算表/);
+  assert.ok(!h.elements.get('sync-status').textContent.includes('已儲存至試算表'));
+  await h.elements.get('logout').listeners.click();
+  assert.ok(h.calls.some(c => c.url.endsWith('/api/logout')));
+  assert.equal(vm.runInContext('token', h.context), '');
+});

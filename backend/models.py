@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, event, Integer, String, Text, Float, Uniqu
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import StaticPool
 import threading
+import os
 
 
 def utcnow():
@@ -64,9 +65,17 @@ class Limit(Base):
     count: Mapped[int] = mapped_column(Integer)
 
 
+class StorageState(Base):
+    __tablename__ = 'storage_state'
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+
+
 class Store:
     def __init__(self, settings):
         self.lock = threading.RLock()
+        if settings.require_persistent_disk and not os.path.ismount('/var/data'):
+            raise ValueError('請先在 Render 掛載 Persistent Disk 至 /var/data；禁止使用暫存磁碟保存學生紀錄。')
         url = settings.database_url
         if url.startswith('sqlite:///'):
             p = settings.path(url.removeprefix('sqlite:///'))
@@ -89,6 +98,10 @@ class Store:
                     if name not in columns:
                         conn.exec_driver_sql(f'ALTER TABLE games ADD COLUMN {name} {spec}')
         self.session = sessionmaker(self.engine, expire_on_commit=False)
+
+    def initialized(self, key):
+        with self.transaction() as db:
+            return db.get(StorageState, key) is not None
 
     @contextmanager
     def transaction(self):

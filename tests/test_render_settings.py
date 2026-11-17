@@ -45,9 +45,17 @@ def test_missing_required_setting_fails_without_secret(render_env, name):
 
 def test_render_rejects_ephemeral_database(render_env):
     render_env.setenv('DATABASE_URL', 'sqlite:///private/test.db')
-    assert Settings.from_env().database_url == 'sqlite://'
+    assert Settings.from_env().database_url == 'sqlite:////var/data/turtlesoup/turtlesoup.db'
+    assert Settings.from_env().require_persistent_disk
     assert Settings.from_env().sheet_storage
-    assert Settings.from_env().sync_seconds == 35
+    assert Settings.from_env().sync_seconds == 3
+
+
+def test_render_refuses_unmounted_path(render_env, monkeypatch):
+    from backend.models import Store
+    monkeypatch.setattr('backend.models.os.path.ismount', lambda path: False)
+    with pytest.raises(ValueError, match='Persistent Disk'):
+        Store(Settings.from_env())
 
 
 def test_local_stays_offline(render_env):
