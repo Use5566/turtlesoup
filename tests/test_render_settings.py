@@ -17,6 +17,7 @@ def test_render_only_two_settings(render_env):
     assert (s.app_mode, s.ai_mode, s.roster_mode) == ('production', 'gemini', 'google')
     assert s.sheets_sync_enabled
     assert s.core_records
+    assert not s.first_puzzle_only
     assert s.google_sheet_id == '17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw'
     assert s.google_roster_sheet_id == ''
     assert s.puzzles_path == '臺灣藍鵲.txt'

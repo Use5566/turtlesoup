@@ -68,11 +68,7 @@ async function activities() {
   try {
     const data = await api("/api/activities");
     if (epoch !== generation || !token) return;
-    $("back").hidden = data.activities.length === 1;
-    if (data.activities.length === 1) {
-      await enterActivity(data.activities[0], epoch);
-      return;
-    }
+    $("back").hidden = false;
     if (!data.activities.length) $("activity-error").textContent = "目前沒有開放的活動，請等候老師。";
     for (const [i, item] of data.activities.entries()) {
       const button = document.createElement("button"); button.className = "activity-card";

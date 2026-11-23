@@ -44,7 +44,7 @@ class Settings:
                 sheets_sync_enabled=True, puzzles_path='臺灣藍鵲.txt',
                 sheet_storage=True, sync_seconds=3, require_persistent_disk=True,
                 google_sheet_id='17LPzhH0CzpiRa_Our-qLanGF7IUJq1COVIjRJ6XI8Qw',
-                core_records=True, first_puzzle_only=True,
+                core_records=True, first_puzzle_only=False,
                 allowed_origins='https://turtlesoup-ytac.onrender.com',
                 gemini_api_key=os.environ['GEMINI_API_KEY'].strip(),
                 google_application_credentials=os.environ['GOOGLE_APPLICATION_CREDENTIALS'].strip(),

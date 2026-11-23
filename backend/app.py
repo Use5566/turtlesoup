@@ -134,7 +134,7 @@ def create_app(settings=None, roster=None, ai=None, google=None):
         return {'mode': settings.ai_mode, 'classes': roster.classes(),
                 'sheets_enabled': settings.sheets_sync_enabled,
                 'record_layout': 'core-fk-v2' if settings.core_records else 'legacy',
-                'build': '20261117-batch-sync'}
+                'build': '20261123-puzzle-selection'}
 
     @app.post('/api/login')
     def login(body: LoginInput, request: Request):

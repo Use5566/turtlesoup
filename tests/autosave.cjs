@@ -10,7 +10,7 @@ function harness() {
       options: [], add(option) { this.options.push(option); }, replaceChildren(...items) { this.options = items; }, listeners: {}, addEventListener(name, fn) { this.listeners[name] = fn; }, append() {}});
     return elements.get(id);
   }
-  const context = vm.createContext({document: {getElementById: element},
+  const context = vm.createContext({document: {getElementById: element, createElement: tag => ({append() {}, addEventListener() {}})},
     window: {TURTLESOUP_CONFIG: {apiBase: 'https://test.invalid'}, addEventListener() {}},
     location: {hostname: 'localhost'}, Option: function(text, value) {this.text = text; this.value = value;}, AbortController,
     setTimeout, clearTimeout, setInterval: (fn, delay) => intervals.push({fn, delay}),
@@ -53,7 +53,7 @@ test('login offers exactly classes 1-7 and seats 1-29', async () => {
 });
 
 
-test('single available puzzle opens directly without a selection card', async () => {
+test('available puzzle stays on selection page until selected', async () => {
   const h = harness();
   h.context.fetch = async (url, options) => {
     h.calls.push({url, options});
@@ -62,11 +62,11 @@ test('single available puzzle opens directly without a selection card', async ()
   };
   vm.runInContext('renderGame = () => {}', h.context);
   await vm.runInContext('activities()', h.context);
-  assert.equal(h.elements.get('game-view').hidden, false);
-  assert.equal(h.elements.get('activities-view').hidden, true);
-  assert.equal(h.elements.get('back').hidden, true);
-  assert.equal(h.elements.get('question').value, '保留草稿');
-  assert.equal(JSON.parse(h.calls.find(c => c.url.endsWith('/api/games')).options.body).activity, 'first');
+  assert.equal(h.elements.get('game-view').hidden, true);
+  assert.equal(h.elements.get('activities-view').hidden, false);
+  assert.equal(h.elements.get('back').hidden, false);
+  assert.equal(h.calls.some(c => c.url.endsWith('/api/games')), false);
+  assert.equal(h.elements.get('activity-error').textContent, '');
 });
 
 
